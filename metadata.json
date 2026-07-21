@@ -1,0 +1,6 @@
+{
+  "name": "知道",
+  "description": "“知道”是一个开放式的学术论文阅读与AI协同分析平台。支持PDF在线导入、文档语义解码（Markdown块分段索引）、交互式句读点选、多视角LLM解析（全文翻译、全文搜索、MD块深度解析等）以及多人协同讨论与备注。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
