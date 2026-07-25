@@ -39,6 +39,9 @@ export default function ReaderCore({
   const [pageCount, setPageCount] = useState<number | null>(null);
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [markdownBlocks, setMarkdownBlocks] = useState<MarkdownBlock[]>([]);
+  const [markdownError, setMarkdownError] = useState<string | null>(null);
+  const [markdownLoading, setMarkdownLoading] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -80,6 +83,30 @@ export default function ReaderCore({
     };
   }, [paper?.id, paper?.isDecoded]);
 
+  useEffect(() => {
+    if (!paper?.isDecoded || viewMode !== 'md') return;
+    const controller = new AbortController();
+    setMarkdownLoading(true);
+    setMarkdownError(null);
+    fetch('/api/papers/' + encodeURIComponent(paper.id) + '/markdown', { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('????? ' + response.status);
+        return response.json() as Promise<{ content: string }>;
+      })
+      .then(({ content }) => {
+        const sections = content.split(/(?=^#{1,6}\s)/m).map((item) => item.trim()).filter(Boolean);
+        setMarkdownBlocks((sections.length ? sections : [content]).map((content, index) => ({
+          id: 'block_' + paper.id + '_' + index, index, content,
+        })));
+      })
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+        setMarkdownBlocks([]);
+        setMarkdownError(error instanceof Error ? error.message : '???? Markdown');
+      })
+      .finally(() => { if (!controller.signal.aborted) setMarkdownLoading(false); });
+    return () => controller.abort();
+  }, [paper?.id, paper?.isDecoded, viewMode]);
   const colors = [
     { name: 'Yellow', value: '#fef08a' }, // yellow-200
     { name: 'Green', value: '#bbf7d0' },  // green-200
@@ -231,7 +258,7 @@ export default function ReaderCore({
                 </p>
               </div>
 
-              {paper.mdBlocks.map((block) => {
+              {markdownLoading ? (<div className="py-12 text-center text-sm text-slate-500">????????? Markdown…</div>) : markdownError ? (<div className="py-12 text-center text-sm text-rose-600">Markdown ????:{markdownError}</div>) : markdownBlocks.map((block) => {
                 const isSelected = selectedBlock?.id === block.id;
                 const blockRemarks = remarks.filter((r) => r.blockId === block.id);
 
@@ -376,3 +403,4 @@ export default function ReaderCore({
     </div>
   );
 }
+

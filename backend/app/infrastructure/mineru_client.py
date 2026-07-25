@@ -11,9 +11,11 @@ class MinerUError(Exception):
 
 @dataclass(frozen=True)
 class MinerUResult:
-    markdown: str
-    pdf_bytes: bytes
-    assets: dict[str, bytes]
+    files: dict[str, bytes]
+    markdown_path: str
+    pdf_path: str | None
+    backend: str | None = None
+    version: str | None = None
 
 class MinerUClient:
     def __init__(self, token: str | None = None):
@@ -22,28 +24,22 @@ class MinerUClient:
 
     async def parse_url(self, source_url: str) -> MinerUResult:
         token = self.token or os.getenv("MINERU_API_TOKEN", "").strip()
-        if not token:
-            raise MinerUError("MINERU_API_TOKEN is not configured.")
+        if not token: raise MinerUError("MINERU_API_TOKEN is not configured.")
         headers = {"Authorization": f"Bearer {token}"}
         async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
             response = await client.post(f"{self.base_url}/extract/task", headers={**headers, "Content-Type": "application/json"}, json={"url": source_url, "model_version": "vlm"})
             response.raise_for_status()
             body = response.json()
             if body.get("code") != 0: raise MinerUError(body.get("msg", "Unable to create MinerU task."))
-            task_id = body["data"]["task_id"]
-            zip_url = await self._wait_for_result(client, headers, task_id)
-            archive = await client.get(zip_url)
-            archive.raise_for_status()
+            zip_url = await self._wait_for_result(client, headers, body["data"]["task_id"])
+            archive = await client.get(zip_url); archive.raise_for_status()
         return self.extract_archive(archive.content)
 
-    async def _wait_for_result(self, client: httpx.AsyncClient, headers: dict, task_id: str) -> str:
+    async def _wait_for_result(self, client, headers, task_id):
         for _ in range(120):
             await asyncio.sleep(5)
-            response = await client.get(f"{self.base_url}/extract/task/{task_id}", headers=headers)
-            response.raise_for_status()
-            body = response.json()
-            if body.get("code") != 0: raise MinerUError(body.get("msg", "Unable to query MinerU task."))
-            data = body["data"]
+            response = await client.get(f"{self.base_url}/extract/task/{task_id}", headers=headers); response.raise_for_status()
+            data = response.json()["data"]
             if data.get("state") == "done" and data.get("full_zip_url"): return data["full_zip_url"]
             if data.get("state") == "failed": raise MinerUError(data.get("err_msg", "MinerU parsing failed."))
         raise MinerUError("MinerU parsing timed out after 10 minutes.")
@@ -52,26 +48,8 @@ class MinerUClient:
     def extract_archive(payload: bytes) -> MinerUResult:
         with zipfile.ZipFile(BytesIO(payload)) as archive:
             names = [name for name in archive.namelist() if not name.endswith("/")]
-            markdown_names = sorted((name for name in names if name.lower().endswith(".md")), key=lambda name: ("full.md" not in name.lower(), len(name)))
-            pdf_names = [name for name in names if name.lower().endswith(".pdf") and not PurePosixPath(name).stem.lower().endswith(("_layout", "_span"))]
-            if not markdown_names: raise MinerUError("MinerU ZIP does not contain a Markdown file.")
-            if not pdf_names: raise MinerUError("MinerU ZIP does not contain the parsed PDF file.")
-            markdown_name = markdown_names[0]
-            markdown_parent = PurePosixPath(markdown_name).parent
-            image_extensions = {".avif", ".gif", ".jpeg", ".jpg", ".png", ".svg", ".webp"}
-            assets: dict[str, bytes] = {}
-            for name in names:
-                path = PurePosixPath(name)
-                if path.suffix.lower() not in image_extensions:
-                    continue
-                try:
-                    relative_path = path.relative_to(markdown_parent)
-                except ValueError:
-                    continue
-                if ".." not in relative_path.parts:
-                    assets[str(relative_path)] = archive.read(name)
-            return MinerUResult(
-                markdown=archive.read(markdown_name).decode("utf-8"),
-                pdf_bytes=archive.read(pdf_names[0]),
-                assets=assets,
-            )
+            safe = [name for name in names if not PurePosixPath(name).is_absolute() and ".." not in PurePosixPath(name).parts]
+            markdown = sorted((name for name in safe if name.lower().endswith(".md")), key=lambda n: ("full.md" not in n.lower(), len(n)))
+            pdf = [name for name in safe if name.lower().endswith(".pdf") and not PurePosixPath(name).stem.lower().endswith(("_layout", "_span"))]
+            if not markdown: raise MinerUError("MinerU ZIP does not contain a Markdown file.")
+            return MinerUResult({name: archive.read(name) for name in safe}, markdown[0], pdf[0] if pdf else None)

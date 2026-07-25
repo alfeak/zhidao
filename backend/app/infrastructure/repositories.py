@@ -1,77 +1,49 @@
 from sqlalchemy import select
 from .database import SessionLocal
-from .orm_models import ModelRecord, PaperRecord, MarkdownBlockRecord, ChatMessageRecord, RemarkRecord
+from .orm_models import DocumentRecord, DocumentArtifactRecord, ChatMessageRecord, RemarkRecord, ModelRecord
 
-MASK = "••••••••••••••••"
-
-def block_dict(block):
-    result = {"id": block.id, "index": block.block_index, "content": block.content}
-    if block.page_index is not None: result["pageIndex"] = block.page_index
-    if block.bbox: result["bbox"] = block.bbox
-    return result
-
-def paper_dict(paper):
-    result = {"id": paper.id, "title": paper.title, "url": paper.url, "isDecoded": paper.is_decoded, "decodeStatus": paper.decode_status, "mdBlocks": [block_dict(block) for block in paper.blocks], "importedAt": paper.imported_at}
-    if paper.decode_error: result["decodeError"] = paper.decode_error
-    return result
+def document_dict(doc):
+    markdown = next((a for a in doc.artifacts if a.kind == "markdown"), None)
+    return {"id": doc.id, "title": doc.title, "url": doc.source_url, "isDecoded": doc.decode_status == "done", "decodeStatus": doc.decode_status, "decodeError": doc.decode_error, "importedAt": doc.imported_at, "markdownObjectKey": markdown.object_key if markdown else None}
 
 class PaperRepository:
     def list(self):
-        with SessionLocal() as session: return [paper_dict(item) for item in session.scalars(select(PaperRecord).order_by(PaperRecord.imported_at.desc())).unique()]
-    def get(self, paper_id):
-        with SessionLocal() as session:
-            paper = session.get(PaperRecord, paper_id)
-            return paper_dict(paper) if paper else None
-    def create(self, paper):
-        with SessionLocal.begin() as session: session.add(PaperRecord(id=paper["id"], title=paper["title"], url=paper["url"], decode_status="pending", imported_at=paper["importedAt"]))
-        return self.get(paper["id"])
-    def set_status(self, paper_id, status, error=None):
-        with SessionLocal.begin() as session:
-            paper = session.get(PaperRecord, paper_id)
-            if paper: paper.decode_status, paper.decode_error = status, error
-    def save_decoding(self, paper_id, title, blocks):
-        with SessionLocal.begin() as session:
-            paper = session.get(PaperRecord, paper_id)
-            if not paper: return
-            paper.title, paper.is_decoded, paper.decode_status, paper.decode_error = title, True, "done", None
-            paper.blocks.clear()
-            paper.blocks.extend(MarkdownBlockRecord(id=f"block_{paper_id}_{index}", block_index=block.get("index", index), content=block.get("content", ""), page_index=block.get("pageIndex", 1), bbox=block.get("bbox", f"Page {block.get('pageIndex', 1)}")) for index, block in enumerate(blocks))
-    def delete(self, paper_id):
-        with SessionLocal.begin() as session:
-            paper = session.get(PaperRecord, paper_id)
-            if not paper: return False
-            session.delete(paper); return True
+        with SessionLocal() as s: return [document_dict(x) for x in s.scalars(select(DocumentRecord).order_by(DocumentRecord.imported_at.desc())).unique()]
+    def get(self, id):
+        with SessionLocal() as s:
+            x=s.get(DocumentRecord,id); return document_dict(x) if x else None
+    def create(self, p):
+        with SessionLocal.begin() as s: s.add(DocumentRecord(id=p["id"],title=p["title"],source_url=p["url"],imported_at=p["importedAt"]))
+        return self.get(p["id"])
+    def set_status(self,id,status,error=None):
+        with SessionLocal.begin() as s:
+            x=s.get(DocumentRecord,id)
+            if x: x.decode_status,x.decode_error=status,error
+    def save_artifacts(self,id, artifacts):
+        with SessionLocal.begin() as s:
+            x=s.get(DocumentRecord,id)
+            if not x:return
+            x.decode_status,x.decode_error="done",None
+            x.artifacts.clear()
+            for n,a in enumerate(artifacts): s.add(DocumentArtifactRecord(id=f"{id}_{n}",document_id=id,archive_path=a.archive_path,object_key=a.object_key,kind=("markdown" if a.archive_path.endswith(".md") else "pdf" if a.archive_path.endswith(".pdf") else "image" if a.content_type.startswith("image/") else "json" if a.archive_path.endswith(".json") else "other"),content_type=a.content_type,byte_size=a.byte_size,sha256=a.sha256))
+    def artifact(self,id,path):
+        with SessionLocal() as s:return s.scalar(select(DocumentArtifactRecord).where(DocumentArtifactRecord.document_id==id,DocumentArtifactRecord.archive_path==path))
+    def delete(self,id):
+        with SessionLocal.begin() as s:
+            x=s.get(DocumentRecord,id)
+            if not x:return False, None
+            prefix=x.object_prefix; s.delete(x); return True, prefix
 
 class ConfigRepository:
-    def get(self, masked=True):
-        with SessionLocal() as session:
-            records = list(session.scalars(select(ModelRecord).order_by(ModelRecord.is_primary.desc(), ModelRecord.id)))
-            return {"models": [{"id": item.id, "name": item.name, "apiKey": MASK if masked and item.api_key else item.api_key, "baseUrl": item.base_url, "isPrimary": item.is_primary} for item in records]}
-    def update(self, payload):
-        previous = self.get(masked=False)
-        models, old = payload.get("models", previous["models"]), {item["id"]: item for item in previous["models"]}
-        with SessionLocal.begin() as session:
-            session.query(ModelRecord).delete()
-            for index, model in enumerate(models):
-                key = model.get("apiKey", "")
-                if isinstance(key, str) and key.startswith("•••"): key = old.get(model.get("id"), {}).get("apiKey", "")
-                session.add(ModelRecord(id=model.get("id") or f"model_{index}", name=model.get("name") or "unnamed-model", api_key=key, base_url=model.get("baseUrl") or "https://api.openai.com/v1", is_primary=bool(model.get("isPrimary"))))
-        return self.get(masked=True)
+    def get(self,masked=True): return {"models":[]}
+    def update(self,payload): return self.get()
 
 class CollaborationRepository:
-    def messages(self, paper_id):
-        with SessionLocal() as session: return [{"id": item.id, "paperId": item.paper_id, "role": item.role, "content": item.content, "createdAt": item.created_at} for item in session.scalars(select(ChatMessageRecord).where(ChatMessageRecord.paper_id == paper_id).order_by(ChatMessageRecord.created_at))]
-    def add_message(self, message):
-        with SessionLocal.begin() as session: session.add(ChatMessageRecord(id=message["id"], paper_id=message["paperId"], role=message["role"], content=message["content"], created_at=message["createdAt"]))
-    def clear_messages(self, paper_id):
-        with SessionLocal.begin() as session:
-            for item in session.scalars(select(ChatMessageRecord).where(ChatMessageRecord.paper_id == paper_id)): session.delete(item)
-    def remarks(self, paper_id):
-        with SessionLocal() as session: return [{"id": item.id, "paperId": item.paper_id, "blockId": item.block_id, "comment": item.comment, "color": item.color, "createdAt": item.created_at} for item in session.scalars(select(RemarkRecord).where(RemarkRecord.paper_id == paper_id).order_by(RemarkRecord.created_at))]
-    def add_remark(self, remark):
-        with SessionLocal.begin() as session: session.add(RemarkRecord(id=remark["id"], paper_id=remark["paperId"], block_id=remark["blockId"], comment=remark["comment"], color=remark["color"], created_at=remark["createdAt"]))
-        return remark
-    def delete_remark(self, remark_id):
-        with SessionLocal.begin() as session:
-            item = session.get(RemarkRecord, remark_id)
-            if item: session.delete(item)
+    def messages(self,paper_id): return []
+    def add_message(self,message): pass
+    def clear_messages(self,paper_id): pass
+    def remarks(self,paper_id): return []
+    def add_remark(self,r): return r
+    def delete_remark(self,id): pass
+
+

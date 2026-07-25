@@ -1,7 +1,7 @@
 from fastapi import APIRouter, BackgroundTasks, Body, HTTPException
 from .application.services import PaperService
 from .domain.errors import NotFoundError, ValidationError
-from fastapi.responses import FileResponse
+from fastapi.responses import StreamingResponse
 from .infrastructure.repositories import ConfigRepository
 
 router = APIRouter(prefix="/api")
@@ -33,17 +33,27 @@ async def test_model(payload: dict = Body(...)):
 
 @router.get("/papers/{paper_id}/file")
 def get_parsed_pdf(paper_id: str):
-    pdf_path = papers.cache_dir / f"{paper_id}.pdf"
-    if not pdf_path.exists():
-        raise HTTPException(status_code=404, detail="Parsed PDF is not available yet.")
-    return FileResponse(pdf_path, media_type="application/pdf")
+    from .infrastructure.database import SessionLocal
+    from .infrastructure.orm_models import DocumentArtifactRecord
+    from sqlalchemy import select
+    with SessionLocal() as session:
+        artifact = session.scalar(select(DocumentArtifactRecord).where(DocumentArtifactRecord.document_id == paper_id, DocumentArtifactRecord.kind == "pdf"))
+    if not artifact: raise HTTPException(status_code=404, detail="Parsed PDF is not available yet.")
+    from .infrastructure.object_store import R2ObjectStore
+    body, media_type = R2ObjectStore().stream(artifact.object_key)
+    return StreamingResponse(body.iter_chunks(), media_type=media_type)
+
 @router.get("/papers/{paper_id}/assets/{asset_path:path}")
 def get_paper_asset(paper_id: str, asset_path: str):
-    root = (papers.asset_cache_dir / paper_id).resolve()
-    candidate = (root / asset_path).resolve()
-    if root not in candidate.parents or not candidate.is_file():
-        raise HTTPException(status_code=404, detail="Paper asset was not found.")
-    return FileResponse(candidate)
+    artifact = papers.artifact(paper_id, asset_path)
+    from .infrastructure.object_store import R2ObjectStore
+    body, media_type = R2ObjectStore().stream(artifact.object_key)
+    return StreamingResponse(body.iter_chunks(), media_type=media_type)
+
+@router.get("/papers/{paper_id}/markdown")
+def get_markdown(paper_id: str):
+    markdown, _ = papers.markdown(paper_id)
+    return {"content": markdown}
 @router.get("/papers")
 def list_papers(): return papers.list_papers()
 
@@ -88,3 +98,4 @@ def add_remark(payload: dict):
 @router.delete("/remarks/{remark_id}")
 def delete_remark(remark_id: str):
     papers.collaboration.delete_remark(remark_id); return {"success": True}
+
