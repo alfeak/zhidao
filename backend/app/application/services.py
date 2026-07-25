@@ -2,33 +2,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 import re
-from urllib.parse import unquote
-import httpx
 
+from ..domain.errors import NotFoundError, ValidationError
+from ..infrastructure.mineru_client import MinerUClient
+from ..infrastructure.openai_gateway import OpenAICompatibleGateway
 from ..infrastructure.repositories import PaperRepository, ConfigRepository, CollaborationRepository
-
-class NotFoundError(Exception): pass
-class ValidationError(Exception): pass
-
-class OpenAICompatibleGateway:
-    async def generate(self, config, prompt, system_instruction=None, response_json=False):
-        models = config["models"]
-        model = next((item for item in models if item["isPrimary"]), models[0] if models else None)
-        if not model: raise ValidationError("No primary OpenAI-compatible model is configured.")
-        if not model["apiKey"]: raise ValidationError(f"API key is missing for model: {model['name']}")
-        base_url = (model["baseUrl"] or "https://api.openai.com/v1").rstrip("/")
-        messages = ([{"role": "system", "content": system_instruction}] if system_instruction else []) + [{"role": "user", "content": prompt}]
-        payload = {"model": model["name"], "messages": messages}
-        if response_json: payload["response_format"] = {"type": "json_object"}
-        async with httpx.AsyncClient(timeout=90) as client:
-            response = await client.post(f"{base_url}/chat/completions", headers={"Authorization": f"Bearer {model['apiKey']}", "Content-Type": "application/json"}, json=payload)
-            response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"]
-
+from .paper_title_resolver import PaperTitleResolver
 class PaperService:
     def __init__(self):
         self.papers, self.config, self.collaboration = PaperRepository(), ConfigRepository(), CollaborationRepository()
         self.llm = OpenAICompatibleGateway()
+        self.title_resolver = PaperTitleResolver()
+        self.mineru = MinerUClient()
         self.cache_dir = Path(__file__).resolve().parents[2] / "data" / "pdfs"
 
     @staticmethod
@@ -37,10 +22,10 @@ class PaperService:
     def identifier(prefix): return f"{prefix}_{uuid4().hex}"
 
     def list_papers(self): return self.papers.list()
-    def import_paper(self, url, title=None):
+    async def import_paper(self, url, title=None):
         if not url or not url.strip(): raise ValidationError("Paper URL is required")
-        name = title or url.rstrip("/").split("/")[-1].removesuffix(".pdf") or "Untitled Paper"
-        return self.papers.create({"id": self.identifier("paper"), "title": re.sub(r"\s+", " ", unquote(name)).strip(), "url": url.strip(), "importedAt": self.now()})
+        resolved = await self.title_resolver.resolve(url, title)
+        return self.papers.create({"id": self.identifier("paper"), "title": resolved.title, "url": resolved.url, "importedAt": self.now()})
     def delete_paper(self, paper_id):
         if not self.papers.delete(paper_id): raise NotFoundError("Paper not found")
         cache = self.cache_dir / f"{paper_id}.pdf"
@@ -55,14 +40,18 @@ class PaperService:
         if not paper: return
         self.papers.set_status(paper_id, "processing")
         try:
+            result = await self.mineru.parse_url(paper["url"])
             self.cache_dir.mkdir(parents=True, exist_ok=True)
-            cache = self.cache_dir / f"{paper_id}.pdf"
-            if not cache.exists():
-                async with httpx.AsyncClient(timeout=90, follow_redirects=True) as client:
-                    response = await client.get(paper["url"]); response.raise_for_status(); cache.write_bytes(response.content)
-            self.papers.save_decoding(paper_id, paper["title"], [{"index": 0, "pageIndex": 1, "bbox": "Document", "content": "## PDF 已导入\n\n当前版本仅使用 OpenAI 兼容接口进行对话与文本操作。PDF 可直接阅读；结构化解析将在接入通用解析器后提供。"}])
+            (self.cache_dir / f"{paper_id}.pdf").write_bytes(result.pdf_bytes)
+            self.papers.save_decoding(paper_id, paper["title"], self._markdown_blocks(result.markdown))
         except Exception as error:
             self.papers.set_status(paper_id, "failed", str(error))
+
+    @staticmethod
+    def _markdown_blocks(markdown: str):
+        sections = [section.strip() for section in re.split(r"(?=^#{1,6}\s)", markdown, flags=re.MULTILINE) if section.strip()]
+        if not sections: raise ValidationError("MinerU returned an empty Markdown document.")
+        return [{"index": index, "pageIndex": 1, "bbox": "MinerU Markdown", "content": section} for index, section in enumerate(sections)]
     async def chat(self, paper_id, message):
         paper = self.papers.get(paper_id)
         if not paper: raise NotFoundError("Paper not found")

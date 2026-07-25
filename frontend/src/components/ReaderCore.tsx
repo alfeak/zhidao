@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Eye, FileText, Sparkles, MessageSquare, Plus, PenTool, Check, Trash } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Document, Page, pdfjs } from 'react-pdf';
@@ -11,10 +11,9 @@ import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 import { Paper, MarkdownBlock, HighlightRemark } from '../types';
 
-pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.mjs',
-  import.meta.url,
-).toString();
+// Keep the worker in Vite's public directory. Using a package URL here produces an
+// /@fs/ URL in development, which PDF.js cannot dynamically import reliably.
+pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 
 interface ReaderCoreProps {
   paper: Paper | null;
@@ -39,6 +38,47 @@ export default function ReaderCore({
   const [activeRemarkFormBlockId, setActiveRemarkFormBlockId] = useState<string | null>(null);
   const [pageCount, setPageCount] = useState<number | null>(null);
   const [pdfError, setPdfError] = useState<string | null>(null);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let objectUrl: string | null = null;
+
+    setPageCount(null);
+    setPdfError(null);
+    setPdfUrl(null);
+
+    if (!paper?.isDecoded) return () => controller.abort();
+
+    const loadPdf = async () => {
+      try {
+        const response = await fetch(`/api/papers/${paper.id}/file`, {
+          signal: controller.signal,
+          headers: { Accept: 'application/pdf' },
+        });
+        if (!response.ok) throw new Error(`服务器返回 ${response.status}`);
+
+        const buffer = await response.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        if (bytes.length < 5 || String.fromCharCode(...bytes.subarray(0, 5)) !== '%PDF-') {
+          throw new Error('接口没有返回有效的 PDF 文件');
+        }
+        if (controller.signal.aborted) return;
+
+        objectUrl = URL.createObjectURL(new Blob([buffer], { type: 'application/pdf' }));
+        setPdfUrl(objectUrl);
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+        setPdfError(error instanceof Error ? `PDF 加载失败：${error.message}` : 'PDF 加载失败，请稍后重试。');
+      }
+    };
+
+    void loadPdf();
+    return () => {
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [paper?.id, paper?.isDecoded]);
 
   const colors = [
     { name: 'Yellow', value: '#fef08a' }, // yellow-200
@@ -126,26 +166,33 @@ export default function ReaderCore({
       <div className="flex-1 min-h-0 relative">
         {activeMode === 'pdf' ? (
           <div className="w-full h-full bg-gray-900 overflow-y-auto relative">
+            {!paper.isDecoded ? (
+              <div className="min-h-full flex items-center justify-center px-6 text-center text-sm text-slate-300">
+                MinerU 正在解析文档。解析完成后将显示由 MinerU 结果包提供的 PDF 和 Markdown。
+              </div>
+            ) : pdfError ? (
+              <div className="min-h-full flex items-center justify-center px-6 text-center text-sm text-rose-200">
+                {pdfError}
+              </div>
+            ) : !pdfUrl ? (
+              <div className="min-h-full flex items-center justify-center text-sm text-slate-300">正在加载 PDF…</div>
+            ) : (
             <Document
               key={paper.id}
-              file={paper.url}
+              file={pdfUrl}
               onLoadSuccess={({ numPages }) => {
                 setPageCount(numPages);
                 setPdfError(null);
               }}
-              onLoadError={() => {
+              onLoadError={(error) => {
                 setPageCount(null);
-                setPdfError('PDF 加载失败，请检查文件链接后重试。');
+                setPdfError(`PDF 渲染失败：${error.message}`);
               }}
               loading={<div className="min-h-full flex items-center justify-center text-sm text-slate-300">正在加载 PDF…</div>}
-              error={null}
+              error={<div className="mt-12 rounded border border-rose-400/40 bg-rose-950/40 px-4 py-3 text-sm text-rose-100">PDF 渲染失败，请重试。</div>}
               className="min-h-full py-6 flex flex-col items-center gap-4"
             >
-              {pdfError ? (
-                <div className="mt-12 rounded border border-rose-400/40 bg-rose-950/40 px-4 py-3 text-sm text-rose-100">
-                  {pdfError}
-                </div>
-              ) : pageCount ? (
+              {pageCount ? (
                 Array.from({ length: pageCount }, (_, index) => (
                   <Page
                     key={`page_${index + 1}`}
@@ -158,13 +205,14 @@ export default function ReaderCore({
                 ))
               ) : null}
             </Document>
+            )}
             {/* Optional Floating decode trigger if failed */}
             {paper.decodeStatus === 'failed' && (
               <div className="absolute top-4 left-4 right-4 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/30 p-4 rounded shadow-md flex items-center justify-between transition-colors duration-300">
                 <div className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-rose-500"></span>
                   <p className="text-xs text-rose-800 dark:text-rose-300 font-medium">
-                    文档语义解码失败。可能因为网络超时。当前仅可浏览原版 PDF，点击右侧可重试解码。
+                    文档解析失败。请在右侧重试；解析成功后将显示 MinerU 返回的 PDF 和 Markdown。
                   </p>
                 </div>
               </div>

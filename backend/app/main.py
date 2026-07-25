@@ -1,14 +1,15 @@
-from contextlib import asynccontextmanager
 from pathlib import Path
 from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from .api import router
-from .application.services import NotFoundError, ValidationError
+from .domain.errors import NotFoundError, ValidationError
 from .infrastructure.database import initialize_database
-
-load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):

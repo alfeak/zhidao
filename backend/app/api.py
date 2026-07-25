@@ -1,5 +1,7 @@
-﻿from fastapi import APIRouter, BackgroundTasks, Body
-from .application.services import PaperService, NotFoundError, ValidationError
+from fastapi import APIRouter, BackgroundTasks, Body, HTTPException
+from .application.services import PaperService
+from .domain.errors import NotFoundError, ValidationError
+from fastapi.responses import FileResponse
 from .infrastructure.repositories import ConfigRepository
 
 router = APIRouter(prefix="/api")
@@ -29,12 +31,18 @@ async def test_model(payload: dict = Body(...)):
     result = await papers.llm.generate({"models": [model]}, "Reply with a short successful connection message.")
     return {"success": True, "message": result}
 
+@router.get("/papers/{paper_id}/file")
+def get_parsed_pdf(paper_id: str):
+    pdf_path = papers.cache_dir / f"{paper_id}.pdf"
+    if not pdf_path.exists():
+        raise HTTPException(status_code=404, detail="Parsed PDF is not available yet.")
+    return FileResponse(pdf_path, media_type="application/pdf")
 @router.get("/papers")
 def list_papers(): return papers.list_papers()
 
 @router.post("/papers/import")
-def import_paper(payload: dict, background_tasks: BackgroundTasks):
-    paper = papers.import_paper(payload.get("url"), payload.get("title"))
+async def import_paper(payload: dict, background_tasks: BackgroundTasks):
+    paper = await papers.import_paper(payload.get("url"), payload.get("title"))
     background_tasks.add_task(papers.decode, paper["id"])
     return {"success": True, "paper": paper}
 
