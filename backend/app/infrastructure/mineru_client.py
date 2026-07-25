@@ -13,6 +13,7 @@ class MinerUError(Exception):
 class MinerUResult:
     markdown: str
     pdf_bytes: bytes
+    assets: dict[str, bytes]
 
 class MinerUClient:
     def __init__(self, token: str | None = None):
@@ -55,4 +56,22 @@ class MinerUClient:
             pdf_names = [name for name in names if name.lower().endswith(".pdf") and not PurePosixPath(name).stem.lower().endswith(("_layout", "_span"))]
             if not markdown_names: raise MinerUError("MinerU ZIP does not contain a Markdown file.")
             if not pdf_names: raise MinerUError("MinerU ZIP does not contain the parsed PDF file.")
-            return MinerUResult(markdown=archive.read(markdown_names[0]).decode("utf-8"), pdf_bytes=archive.read(pdf_names[0]))
+            markdown_name = markdown_names[0]
+            markdown_parent = PurePosixPath(markdown_name).parent
+            image_extensions = {".avif", ".gif", ".jpeg", ".jpg", ".png", ".svg", ".webp"}
+            assets: dict[str, bytes] = {}
+            for name in names:
+                path = PurePosixPath(name)
+                if path.suffix.lower() not in image_extensions:
+                    continue
+                try:
+                    relative_path = path.relative_to(markdown_parent)
+                except ValueError:
+                    continue
+                if ".." not in relative_path.parts:
+                    assets[str(relative_path)] = archive.read(name)
+            return MinerUResult(
+                markdown=archive.read(markdown_name).decode("utf-8"),
+                pdf_bytes=archive.read(pdf_names[0]),
+                assets=assets,
+            )

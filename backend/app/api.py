@@ -37,6 +37,13 @@ def get_parsed_pdf(paper_id: str):
     if not pdf_path.exists():
         raise HTTPException(status_code=404, detail="Parsed PDF is not available yet.")
     return FileResponse(pdf_path, media_type="application/pdf")
+@router.get("/papers/{paper_id}/assets/{asset_path:path}")
+def get_paper_asset(paper_id: str, asset_path: str):
+    root = (papers.asset_cache_dir / paper_id).resolve()
+    candidate = (root / asset_path).resolve()
+    if root not in candidate.parents or not candidate.is_file():
+        raise HTTPException(status_code=404, detail="Paper asset was not found.")
+    return FileResponse(candidate)
 @router.get("/papers")
 def list_papers(): return papers.list_papers()
 

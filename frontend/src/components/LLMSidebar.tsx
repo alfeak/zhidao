@@ -24,7 +24,7 @@ import {
   RefreshCw,
   Activity,
 } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
+import MarkdownRenderer from './MarkdownRenderer';
 import { Paper, ChatMessage, HighlightRemark, SystemConfig, MarkdownBlock } from '../types';
 
 interface LLMSidebarProps {
@@ -279,7 +279,7 @@ export default function LLMSidebar({
                           {isUser ? (
                             <p className="whitespace-pre-wrap">{msg.content}</p>
                           ) : (
-                            <ReactMarkdown>{msg.content}</ReactMarkdown>
+                            <MarkdownRenderer content={msg.content} paperId={paper?.id} />
                           )}
                         </div>
                       </div>
@@ -353,7 +353,7 @@ export default function LLMSidebar({
                 </div>
               ) : (
                 <div className="bg-white dark:bg-slate-900 p-5 rounded border border-gray-250 dark:border-slate-800 shadow-xs markdown-body text-xs text-slate-800 dark:text-slate-100 transition-colors duration-300">
-                  <ReactMarkdown>{actionResult}</ReactMarkdown>
+                  <MarkdownRenderer content={actionResult} paperId={paper?.id} />
                 </div>
               )}
             </div>

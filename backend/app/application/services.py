@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 from pathlib import Path
+from pathlib import PurePosixPath
+import shutil
 from uuid import uuid4
 import re
 
@@ -15,6 +17,7 @@ class PaperService:
         self.title_resolver = PaperTitleResolver()
         self.mineru = MinerUClient()
         self.cache_dir = Path(__file__).resolve().parents[2] / "data" / "pdfs"
+        self.asset_cache_dir = Path(__file__).resolve().parents[2] / "data" / "assets"
 
     @staticmethod
     def now(): return datetime.now(timezone.utc).isoformat()
@@ -30,6 +33,8 @@ class PaperService:
         if not self.papers.delete(paper_id): raise NotFoundError("Paper not found")
         cache = self.cache_dir / f"{paper_id}.pdf"
         if cache.exists(): cache.unlink()
+        asset_dir = self.asset_cache_dir / paper_id
+        if asset_dir.exists(): shutil.rmtree(asset_dir)
     def start_decoding(self, paper_id):
         paper = self.papers.get(paper_id)
         if not paper: raise NotFoundError("Paper not found")
@@ -43,6 +48,11 @@ class PaperService:
             result = await self.mineru.parse_url(paper["url"])
             self.cache_dir.mkdir(parents=True, exist_ok=True)
             (self.cache_dir / f"{paper_id}.pdf").write_bytes(result.pdf_bytes)
+            asset_dir = self.asset_cache_dir / paper_id
+            for asset_path, asset_bytes in result.assets.items():
+                destination = asset_dir.joinpath(*PurePosixPath(asset_path).parts)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(asset_bytes)
             self.papers.save_decoding(paper_id, paper["title"], self._markdown_blocks(result.markdown))
         except Exception as error:
             self.papers.set_status(paper_id, "failed", str(error))

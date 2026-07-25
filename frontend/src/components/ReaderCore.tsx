@@ -5,10 +5,10 @@
 
 import React, { useEffect, useState } from 'react';
 import { Eye, FileText, Sparkles, MessageSquare, Plus, PenTool, Check, Trash } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
 import { Document, Page, pdfjs } from 'react-pdf';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
+import MarkdownRenderer from './MarkdownRenderer';
 import { Paper, MarkdownBlock, HighlightRemark } from '../types';
 
 // Keep the worker in Vite's public directory. Using a package URL here produces an
@@ -259,7 +259,7 @@ export default function ReaderCore({
 
                     {/* Block markdown content */}
                     <div className="markdown-body text-gray-800 dark:text-slate-100 text-sm">
-                      <ReactMarkdown>{block.content}</ReactMarkdown>
+                      <MarkdownRenderer content={block.content} paperId={paper.id} />
                     </div>
 
                     {/* Existing remarks list for this block */}
