@@ -123,3 +123,14 @@
   color: #e2e8f0;
 }
 
+
+/* The document page remains white for accurate PDF colors; the surrounding reader
+   surface follows the global light/dark theme. */
+.pdf-document .react-pdf__Page {
+  background: white;
+  box-shadow: 0 12px 28px rgb(15 23 42 / 0.16);
+}
+
+.dark .pdf-document .react-pdf__Page {
+  box-shadow: 0 16px 36px rgb(0 0 0 / 0.48);
+}

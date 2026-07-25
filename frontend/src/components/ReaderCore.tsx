@@ -165,17 +165,17 @@ export default function ReaderCore({
       {/* Reader Stage */}
       <div className="flex-1 min-h-0 relative">
         {activeMode === 'pdf' ? (
-          <div className="w-full h-full bg-gray-900 overflow-y-auto relative">
+          <div className="w-full h-full bg-slate-100 dark:bg-slate-950 overflow-y-auto relative transition-colors duration-300">
             {!paper.isDecoded ? (
-              <div className="min-h-full flex items-center justify-center px-6 text-center text-sm text-slate-300">
+              <div className="min-h-full flex items-center justify-center px-6 text-center text-sm text-slate-600 dark:text-slate-300 transition-colors duration-300">
                 MinerU 正在解析文档。解析完成后将显示由 MinerU 结果包提供的 PDF 和 Markdown。
               </div>
             ) : pdfError ? (
-              <div className="min-h-full flex items-center justify-center px-6 text-center text-sm text-rose-200">
+              <div className="min-h-full flex items-center justify-center px-6 text-center text-sm text-rose-700 dark:text-rose-200 transition-colors duration-300">
                 {pdfError}
               </div>
             ) : !pdfUrl ? (
-              <div className="min-h-full flex items-center justify-center text-sm text-slate-300">正在加载 PDF…</div>
+              <div className="min-h-full flex items-center justify-center text-sm text-slate-600 dark:text-slate-300 transition-colors duration-300">正在加载 PDF…</div>
             ) : (
             <Document
               key={paper.id}
@@ -188,9 +188,9 @@ export default function ReaderCore({
                 setPageCount(null);
                 setPdfError(`PDF 渲染失败：${error.message}`);
               }}
-              loading={<div className="min-h-full flex items-center justify-center text-sm text-slate-300">正在加载 PDF…</div>}
+              loading={<div className="min-h-full flex items-center justify-center text-sm text-slate-600 dark:text-slate-300 transition-colors duration-300">正在加载 PDF…</div>}
               error={<div className="mt-12 rounded border border-rose-400/40 bg-rose-950/40 px-4 py-3 text-sm text-rose-100">PDF 渲染失败，请重试。</div>}
-              className="min-h-full py-6 flex flex-col items-center gap-4"
+              className="pdf-document min-h-full py-6 flex flex-col items-center gap-4"
             >
               {pageCount ? (
                 Array.from({ length: pageCount }, (_, index) => (
