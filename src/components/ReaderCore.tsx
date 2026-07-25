@@ -6,7 +6,15 @@
 import React, { useState } from 'react';
 import { Eye, FileText, Sparkles, MessageSquare, Plus, PenTool, Check, Trash } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import { Document, Page, pdfjs } from 'react-pdf';
+import 'react-pdf/dist/Page/AnnotationLayer.css';
+import 'react-pdf/dist/Page/TextLayer.css';
 import { Paper, MarkdownBlock, HighlightRemark } from '../types';
+
+pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.mjs',
+  import.meta.url,
+).toString();
 
 interface ReaderCoreProps {
   paper: Paper | null;
@@ -29,6 +37,8 @@ export default function ReaderCore({
   const [remarkText, setRemarkText] = useState('');
   const [selectedColor, setSelectedColor] = useState('#fef08a'); // Tailwind yellow-200
   const [activeRemarkFormBlockId, setActiveRemarkFormBlockId] = useState<string | null>(null);
+  const [pageCount, setPageCount] = useState<number | null>(null);
+  const [pdfError, setPdfError] = useState<string | null>(null);
 
   const colors = [
     { name: 'Yellow', value: '#fef08a' }, // yellow-200
@@ -115,13 +125,39 @@ export default function ReaderCore({
       {/* Reader Stage */}
       <div className="flex-1 min-h-0 relative">
         {activeMode === 'pdf' ? (
-          <div className="w-full h-full bg-gray-900 flex items-center justify-center relative">
-            {/* Real PDF Embed Proxy */}
-            <iframe
-              src={`/api/pdf-proxy?id=${paper.id}`}
-              className="w-full h-full border-0 bg-gray-900"
-              title={paper.title}
-            />
+          <div className="w-full h-full bg-gray-900 overflow-y-auto relative">
+            <Document
+              key={paper.id}
+              file={paper.url}
+              onLoadSuccess={({ numPages }) => {
+                setPageCount(numPages);
+                setPdfError(null);
+              }}
+              onLoadError={() => {
+                setPageCount(null);
+                setPdfError('PDF 加载失败，请检查文件链接后重试。');
+              }}
+              loading={<div className="min-h-full flex items-center justify-center text-sm text-slate-300">正在加载 PDF…</div>}
+              error={null}
+              className="min-h-full py-6 flex flex-col items-center gap-4"
+            >
+              {pdfError ? (
+                <div className="mt-12 rounded border border-rose-400/40 bg-rose-950/40 px-4 py-3 text-sm text-rose-100">
+                  {pdfError}
+                </div>
+              ) : pageCount ? (
+                Array.from({ length: pageCount }, (_, index) => (
+                  <Page
+                    key={`page_${index + 1}`}
+                    pageNumber={index + 1}
+                    width={900}
+                    className="max-w-[calc(100vw-3rem)] shadow-xl"
+                    renderAnnotationLayer
+                    renderTextLayer
+                  />
+                ))
+              ) : null}
+            </Document>
             {/* Optional Floating decode trigger if failed */}
             {paper.decodeStatus === 'failed' && (
               <div className="absolute top-4 left-4 right-4 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/30 p-4 rounded shadow-md flex items-center justify-between transition-colors duration-300">

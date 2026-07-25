@@ -359,46 +359,6 @@ app.get('/api/papers', (req, res) => {
   res.json(db.papers);
 });
 
-// PDF Proxy / Cached PDF Server
-app.get('/api/pdf-proxy', (req, res) => {
-  const paperId = req.query.id as string;
-  if (!paperId) {
-    return res.status(400).json({ error: 'Missing paper id' });
-  }
-
-  const cachedPath = path.join(PDF_CACHE_DIR, `${paperId}.pdf`);
-  if (fs.existsSync(cachedPath)) {
-    res.setHeader('Content-Type', 'application/pdf');
-    return fs.createReadStream(cachedPath).pipe(res);
-  }
-
-  // If not cached, let's find the paper and fetch the URL
-  const db = readDb();
-  const paper = db.papers.find((p) => p.id === paperId);
-  if (!paper) {
-    return res.status(404).json({ error: 'Paper not found' });
-  }
-
-  // Attempt to download and stream
-  fetch(paper.url)
-    .then(async (response: any) => {
-      if (!response.ok) throw new Error(`Fetch failed with status ${response.status}`);
-      const arrayBuffer = await response.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-      
-      // Save cache in background
-      fs.writeFileSync(cachedPath, buffer);
-      
-      res.setHeader('Content-Type', 'application/pdf');
-      res.send(buffer);
-    })
-    .catch((err) => {
-      console.error('PDF proxy fetch error:', err);
-      // Serve a mock tiny PDF if fetch failed, or error
-      res.status(500).json({ error: 'Could not fetch remote PDF: ' + err.message });
-    });
-});
-
 // Delete paper
 app.delete('/api/papers/:id', (req, res) => {
   const { id } = req.params;
