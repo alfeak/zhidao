@@ -18,7 +18,7 @@ export interface Paper {
   isDecoded: boolean;
   decodeStatus: 'idle' | 'pending' | 'processing' | 'done' | 'failed';
   decodeError?: string;
-  mdBlocks: MarkdownBlock[];
+  mdBlocks?: MarkdownBlock[];
   importedAt: string;
 }
 
@@ -48,6 +48,6 @@ export interface CustomModel {
 }
 
 export interface SystemConfig {
-  mineruApiKey: string;
   models: CustomModel[];
 }
+

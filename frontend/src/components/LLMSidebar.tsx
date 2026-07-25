@@ -24,7 +24,7 @@ import {
   RefreshCw,
   Activity,
 } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
+import MarkdownRenderer from './MarkdownRenderer';
 import { Paper, ChatMessage, HighlightRemark, SystemConfig, MarkdownBlock } from '../types';
 
 interface LLMSidebarProps {
@@ -71,10 +71,6 @@ export default function LLMSidebar({
   // Testing states
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, { success: boolean; message: string }>>({});
-
-  // MinerU testing state
-  const [testingMinerU, setTestingMinerU] = useState(false);
-  const [minerUTestResult, setMinerUTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
   const [showKeys, setShowKeys] = useState(false);
   const [configSuccess, setConfigSuccess] = useState(false);
@@ -135,7 +131,7 @@ export default function LLMSidebar({
 
   const handleTestNewModel = async () => {
     if (!newModelName.trim()) {
-      alert('请先输入要测试的模型名称（如 gemini-2.5-flash）。');
+      alert('请先输入要测试的模型名称（如 gpt-4o-mini）。');
       return;
     }
     setTestingId('new_model_temp');
@@ -160,23 +156,6 @@ export default function LLMSidebar({
       setTestResults(prev => ({ ...prev, 'new_model_temp': { success: false, message: err.message || '网络连接失败' } }));
     } finally {
       setTestingId(null);
-    }
-  };
-
-  const handleTestMinerU = async () => {
-    if (!config.mineruApiKey) {
-      alert('请先输入 OpenXLab MinerU API Key 再进行测试！');
-      return;
-    }
-    setTestingMinerU(true);
-    setMinerUTestResult({ success: true, message: '正在向 OpenXLab 验证密钥...' });
-    try {
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      setMinerUTestResult({ success: true, message: 'MinerU API 授权验证成功！解析增强功能已就绪。' });
-    } catch (err: any) {
-      setMinerUTestResult({ success: false, message: '验证失败：' + (err.message || '未知错误') });
-    } finally {
-      setTestingMinerU(false);
     }
   };
 
@@ -288,7 +267,7 @@ export default function LLMSidebar({
                         className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}
                       >
                         <span className="text-[9px] text-gray-400 mb-1 font-mono">
-                          {isUser ? '协同用户' : `知道 AI (${config.models?.find(m => m.isPrimary)?.name || 'Gemini'})`}
+                          {isUser ? '协同用户' : `知道 AI (${config.models?.find(m => m.isPrimary)?.name || 'OpenAI-compatible model'})`}
                         </span>
                         <div
                           className={`p-3 rounded-2xl max-w-[90%] text-xs leading-relaxed ${
@@ -300,7 +279,7 @@ export default function LLMSidebar({
                           {isUser ? (
                             <p className="whitespace-pre-wrap">{msg.content}</p>
                           ) : (
-                            <ReactMarkdown>{msg.content}</ReactMarkdown>
+                            <MarkdownRenderer content={msg.content} paperId={paper?.id} />
                           )}
                         </div>
                       </div>
@@ -374,7 +353,7 @@ export default function LLMSidebar({
                 </div>
               ) : (
                 <div className="bg-white dark:bg-slate-900 p-5 rounded border border-gray-250 dark:border-slate-800 shadow-xs markdown-body text-xs text-slate-800 dark:text-slate-100 transition-colors duration-300">
-                  <ReactMarkdown>{actionResult}</ReactMarkdown>
+                  <MarkdownRenderer content={actionResult} paperId={paper?.id} />
                 </div>
               )}
             </div>
@@ -460,72 +439,11 @@ export default function LLMSidebar({
               </button>
             </div>
 
-            {/* Section 1: MinerU PDF Decoding Configuration */}
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-lg border border-gray-200 dark:border-slate-800 shadow-xs space-y-3 transition-colors duration-300">
-              <div className="flex items-center justify-between border-b border-gray-100 dark:border-slate-800 pb-2">
-                <div className="flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                  <span className="text-xs font-bold text-gray-800 dark:text-slate-200">1. MinerU PDF 论文解析引擎</span>
-                </div>
-                <span className="text-[9px] bg-amber-50 dark:bg-amber-950/20 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-900/30 px-1.5 py-0.5 rounded font-mono font-bold">
-                  PDF 句读基础
-                </span>
-              </div>
-              <p className="text-[10px] text-gray-400 dark:text-slate-400 leading-relaxed">
-                导入 PDF 论文时，本系统使用 MinerU 结构化提取引擎生成公式与句读级 Markdown。请输入 OpenXLab MinerU API Key 激活，留空则使用高保真模拟引擎。
-              </p>
-
-              <div className="space-y-1.5">
-                <span className="text-[10px] text-gray-500 dark:text-slate-400 block font-medium">MinerU API 密钥 (OpenXLab)</span>
-                <div className="relative">
-                  <input
-                    type={showKeys ? 'text' : 'password'}
-                    placeholder={config.mineruApiKey ? "已安全加密保存 (输入以覆盖)" : "输入 OpenXLab MinerU API Key..."}
-                    value={config.mineruApiKey === '••••••••••••••••' ? '' : config.mineruApiKey}
-                    onChange={(e) => onUpdateConfig({ mineruApiKey: e.target.value })}
-                    className="w-full text-xs px-2.5 py-2 bg-slate-50/50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded focus:bg-white dark:focus:bg-slate-900 focus:border-black dark:focus:border-white outline-none font-mono text-gray-800 dark:text-slate-100"
-                  />
-                  <Lock className="w-3 h-3 text-gray-300 dark:text-slate-500 absolute right-3 top-3" />
-                </div>
-                <span className="text-[9px] text-gray-400 dark:text-slate-500 block italic">已保存的模型密钥不可查看哈，只能输入覆盖更改。</span>
-              </div>
-
-              <div className="pt-1">
-                <button
-                  type="button"
-                  disabled={testingMinerU || !config.mineruApiKey}
-                  onClick={handleTestMinerU}
-                  className="w-full py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-200 disabled:opacity-50 disabled:cursor-not-allowed rounded text-[10px] font-bold transition-all cursor-pointer flex items-center justify-center gap-1"
-                >
-                  {testingMinerU ? (
-                    <>
-                      <Loader2 className="w-3 h-3 animate-spin" />
-                      <span>正在校验...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Check className="w-3 h-3 text-green-600 dark:text-green-400" />
-                      <span>测试 MinerU 连接状态</span>
-                    </>
-                  )}
-                </button>
-
-                {minerUTestResult && (
-                  <div className={`mt-2 p-2 rounded text-[9px] leading-relaxed flex items-start gap-1.5 ${
-                    minerUTestResult.success ? 'bg-green-50 dark:bg-green-950/20 text-green-800 dark:text-green-400 border border-green-200 dark:border-green-900/30' : 'bg-red-50 dark:bg-red-950/20 text-red-800 dark:text-red-400 border border-red-200 dark:border-red-900/30'
-                  }`}>
-                    <Activity className="w-3 h-3 shrink-0 mt-0.5" />
-                    <span>{minerUTestResult.message}</span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Section 2: Large Language Models List */}
+            {/* OpenAI-compatible models */}
             <div className="space-y-3.5">
               <div className="flex items-center gap-1.5 border-b border-gray-200 dark:border-slate-800 pb-2">
                 <Activity className="w-3.5 h-3.5 text-black dark:text-white" />
-                <span className="text-xs font-bold text-gray-800 dark:text-slate-200">2. 大语言模型列表 (LLM List)</span>
+                <span className="text-xs font-bold text-gray-800 dark:text-slate-200">OpenAI 兼容模型列表</span>
               </div>
 
               {/* Models scroll */}
@@ -580,7 +498,7 @@ export default function LLMSidebar({
                       <div className="mt-2.5 space-y-2 text-[10px]">
                         <div>
                           <span className="text-gray-450 dark:text-slate-450">接口地址 (Base URL): </span>
-                          <span className="font-mono text-gray-600 dark:text-slate-300 break-all">{mod.baseUrl || '官方原生通道 (Gemini)'}</span>
+                          <span className="font-mono text-gray-600 dark:text-slate-300 break-all">{mod.baseUrl || 'https://api.openai.com/v1'}</span>
                         </div>
 
                         {/* Inline Key Modification */}
@@ -652,7 +570,7 @@ export default function LLMSidebar({
                     <span className="text-[10px] font-medium text-gray-500 dark:text-slate-400 block">模型名称 (Model Name) <span className="text-red-500">*</span></span>
                     <input
                       type="text"
-                      placeholder="例如: gemini-2.5-flash 或 gpt-4o-mini..."
+                      placeholder="例如: gpt-4o-mini 或 gpt-4o-mini..."
                       required
                       value={newModelName}
                       onChange={(e) => setNewModelName(e.target.value)}
@@ -756,7 +674,7 @@ export default function LLMSidebar({
               <div>
                 <span className="font-bold block">知道平台协同同步已激活</span>
                 <p className="mt-0.5 leading-relaxed text-emerald-700/90 dark:text-emerald-400/90">
-                  您对 MinerU 密钥或 LLM 模型列表所做的任何修改都将立即自动向全平台公开并加密同步。所有人免登录、零壁垒直接协作调用！
+                  您对 LLM 模型列表所做的任何修改都将立即自动向全平台公开并加密同步。所有人免登录、零壁垒直接协作调用！
                 </p>
               </div>
             </div>

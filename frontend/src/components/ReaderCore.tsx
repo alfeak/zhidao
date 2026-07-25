@@ -3,10 +3,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Eye, FileText, Sparkles, MessageSquare, Plus, PenTool, Check, Trash } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
+import { Document, Page, pdfjs } from 'react-pdf';
+import 'react-pdf/dist/Page/AnnotationLayer.css';
+import 'react-pdf/dist/Page/TextLayer.css';
+import MarkdownRenderer from './MarkdownRenderer';
 import { Paper, MarkdownBlock, HighlightRemark } from '../types';
+
+// Keep the worker in Vite's public directory. Using a package URL here produces an
+// /@fs/ URL in development, which PDF.js cannot dynamically import reliably.
+pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 
 interface ReaderCoreProps {
   paper: Paper | null;
@@ -29,7 +36,77 @@ export default function ReaderCore({
   const [remarkText, setRemarkText] = useState('');
   const [selectedColor, setSelectedColor] = useState('#fef08a'); // Tailwind yellow-200
   const [activeRemarkFormBlockId, setActiveRemarkFormBlockId] = useState<string | null>(null);
+  const [pageCount, setPageCount] = useState<number | null>(null);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [markdownBlocks, setMarkdownBlocks] = useState<MarkdownBlock[]>([]);
+  const [markdownError, setMarkdownError] = useState<string | null>(null);
+  const [markdownLoading, setMarkdownLoading] = useState(false);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    let objectUrl: string | null = null;
+
+    setPageCount(null);
+    setPdfError(null);
+    setPdfUrl(null);
+
+    if (!paper?.isDecoded) return () => controller.abort();
+
+    const loadPdf = async () => {
+      try {
+        const response = await fetch(`/api/papers/${paper.id}/file`, {
+          signal: controller.signal,
+          headers: { Accept: 'application/pdf' },
+        });
+        if (!response.ok) throw new Error(`服务器返回 ${response.status}`);
+
+        const buffer = await response.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        if (bytes.length < 5 || String.fromCharCode(...bytes.subarray(0, 5)) !== '%PDF-') {
+          throw new Error('接口没有返回有效的 PDF 文件');
+        }
+        if (controller.signal.aborted) return;
+
+        objectUrl = URL.createObjectURL(new Blob([buffer], { type: 'application/pdf' }));
+        setPdfUrl(objectUrl);
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+        setPdfError(error instanceof Error ? `PDF 加载失败：${error.message}` : 'PDF 加载失败，请稍后重试。');
+      }
+    };
+
+    void loadPdf();
+    return () => {
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [paper?.id, paper?.isDecoded]);
+
+  useEffect(() => {
+    if (!paper?.isDecoded || viewMode !== 'md') return;
+    const controller = new AbortController();
+    setMarkdownLoading(true);
+    setMarkdownError(null);
+    fetch('/api/papers/' + encodeURIComponent(paper.id) + '/markdown', { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('????? ' + response.status);
+        return response.json() as Promise<{ content: string }>;
+      })
+      .then(({ content }) => {
+        const sections = content.split(/(?=^#{1,6}\s)/m).map((item) => item.trim()).filter(Boolean);
+        setMarkdownBlocks((sections.length ? sections : [content]).map((content, index) => ({
+          id: 'block_' + paper.id + '_' + index, index, content,
+        })));
+      })
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+        setMarkdownBlocks([]);
+        setMarkdownError(error instanceof Error ? error.message : '???? Markdown');
+      })
+      .finally(() => { if (!controller.signal.aborted) setMarkdownLoading(false); });
+    return () => controller.abort();
+  }, [paper?.id, paper?.isDecoded, viewMode]);
   const colors = [
     { name: 'Yellow', value: '#fef08a' }, // yellow-200
     { name: 'Green', value: '#bbf7d0' },  // green-200
@@ -115,20 +192,54 @@ export default function ReaderCore({
       {/* Reader Stage */}
       <div className="flex-1 min-h-0 relative">
         {activeMode === 'pdf' ? (
-          <div className="w-full h-full bg-gray-900 flex items-center justify-center relative">
-            {/* Real PDF Embed Proxy */}
-            <iframe
-              src={`/api/pdf-proxy?id=${paper.id}`}
-              className="w-full h-full border-0 bg-gray-900"
-              title={paper.title}
-            />
+          <div className="w-full h-full bg-slate-100 dark:bg-slate-950 overflow-y-auto relative transition-colors duration-300">
+            {!paper.isDecoded ? (
+              <div className="min-h-full flex items-center justify-center px-6 text-center text-sm text-slate-600 dark:text-slate-300 transition-colors duration-300">
+                MinerU 正在解析文档。解析完成后将显示由 MinerU 结果包提供的 PDF 和 Markdown。
+              </div>
+            ) : pdfError ? (
+              <div className="min-h-full flex items-center justify-center px-6 text-center text-sm text-rose-700 dark:text-rose-200 transition-colors duration-300">
+                {pdfError}
+              </div>
+            ) : !pdfUrl ? (
+              <div className="min-h-full flex items-center justify-center text-sm text-slate-600 dark:text-slate-300 transition-colors duration-300">正在加载 PDF…</div>
+            ) : (
+            <Document
+              key={paper.id}
+              file={pdfUrl}
+              onLoadSuccess={({ numPages }) => {
+                setPageCount(numPages);
+                setPdfError(null);
+              }}
+              onLoadError={(error) => {
+                setPageCount(null);
+                setPdfError(`PDF 渲染失败：${error.message}`);
+              }}
+              loading={<div className="min-h-full flex items-center justify-center text-sm text-slate-600 dark:text-slate-300 transition-colors duration-300">正在加载 PDF…</div>}
+              error={<div className="mt-12 rounded border border-rose-400/40 bg-rose-950/40 px-4 py-3 text-sm text-rose-100">PDF 渲染失败，请重试。</div>}
+              className="pdf-document min-h-full py-6 flex flex-col items-center gap-4"
+            >
+              {pageCount ? (
+                Array.from({ length: pageCount }, (_, index) => (
+                  <Page
+                    key={`page_${index + 1}`}
+                    pageNumber={index + 1}
+                    width={900}
+                    className="max-w-[calc(100vw-3rem)] shadow-xl"
+                    renderAnnotationLayer
+                    renderTextLayer
+                  />
+                ))
+              ) : null}
+            </Document>
+            )}
             {/* Optional Floating decode trigger if failed */}
             {paper.decodeStatus === 'failed' && (
               <div className="absolute top-4 left-4 right-4 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/30 p-4 rounded shadow-md flex items-center justify-between transition-colors duration-300">
                 <div className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-rose-500"></span>
                   <p className="text-xs text-rose-800 dark:text-rose-300 font-medium">
-                    文档语义解码失败。可能因为网络超时。当前仅可浏览原版 PDF，点击右侧可重试解码。
+                    文档解析失败。请在右侧重试；解析成功后将显示 MinerU 返回的 PDF 和 Markdown。
                   </p>
                 </div>
               </div>
@@ -140,14 +251,14 @@ export default function ReaderCore({
             <div className="max-w-3xl mx-auto space-y-6">
               <div className="border-b border-gray-200 dark:border-slate-800 pb-4 mb-6">
                 <span className="text-[10px] uppercase tracking-widest font-mono text-gray-600 dark:text-slate-300 font-bold bg-gray-200/60 dark:bg-slate-800/80 px-2 py-1 rounded">
-                  MinerU 解码句读流 (Point-Selectable Markdown Blocks)
+                  结构化 Markdown 区块 (Point-Selectable Markdown Blocks)
                 </span>
                 <p className="text-xs text-gray-500 dark:text-slate-400 mt-2 leading-relaxed">
                   提示：以下各卡片代表解码出的段落块。你可以随时【点击任意卡片】将其发送到右侧 LLM 解析栏，并进行点选多维解析与高亮备注。
                 </p>
               </div>
 
-              {paper.mdBlocks.map((block) => {
+              {markdownLoading ? (<div className="py-12 text-center text-sm text-slate-500">????????? Markdown�</div>) : markdownError ? (<div className="py-12 text-center text-sm text-rose-600">Markdown ????:{markdownError}</div>) : markdownBlocks.map((block) => {
                 const isSelected = selectedBlock?.id === block.id;
                 const blockRemarks = remarks.filter((r) => r.blockId === block.id);
 
@@ -175,7 +286,7 @@ export default function ReaderCore({
 
                     {/* Block markdown content */}
                     <div className="markdown-body text-gray-800 dark:text-slate-100 text-sm">
-                      <ReactMarkdown>{block.content}</ReactMarkdown>
+                      <MarkdownRenderer content={block.content} paperId={paper.id} />
                     </div>
 
                     {/* Existing remarks list for this block */}
@@ -292,3 +403,4 @@ export default function ReaderCore({
     </div>
   );
 }
+
