@@ -176,7 +176,7 @@ export default function ReaderCore({
             <div className="max-w-3xl mx-auto space-y-6">
               <div className="border-b border-gray-200 dark:border-slate-800 pb-4 mb-6">
                 <span className="text-[10px] uppercase tracking-widest font-mono text-gray-600 dark:text-slate-300 font-bold bg-gray-200/60 dark:bg-slate-800/80 px-2 py-1 rounded">
-                  MinerU 解码句读流 (Point-Selectable Markdown Blocks)
+                  结构化 Markdown 区块 (Point-Selectable Markdown Blocks)
                 </span>
                 <p className="text-xs text-gray-500 dark:text-slate-400 mt-2 leading-relaxed">
                   提示：以下各卡片代表解码出的段落块。你可以随时【点击任意卡片】将其发送到右侧 LLM 解析栏，并进行点选多维解析与高亮备注。

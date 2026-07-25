@@ -1,13 +1,8 @@
-﻿from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 class Base(DeclarativeBase):
     pass
-
-class SettingRecord(Base):
-    __tablename__ = "settings"
-    key: Mapped[str] = mapped_column(String, primary_key=True)
-    value: Mapped[str] = mapped_column(Text, nullable=False)
 
 class ModelRecord(Base):
     __tablename__ = "models"

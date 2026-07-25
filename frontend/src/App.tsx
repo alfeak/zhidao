@@ -59,18 +59,16 @@ export default function App() {
   };
 
   const [config, setConfig] = useState<SystemConfig>({
-    mineruApiKey: '',
     models: [
       {
-        id: 'model_default_gemini',
-        name: 'gemini-3.5-flash',
+        id: 'model_default_openai',
+        name: 'gpt-4o-mini',
         apiKey: '',
-        baseUrl: '',
-        isPrimary: true
-      }
+        baseUrl: 'https://api.openai.com/v1',
+        isPrimary: true,
+      },
     ],
   });
-
   const isPaperDecoded = !!(activePaper && activePaper.isDecoded);
   const prevDecodedRef = useRef(isPaperDecoded);
 

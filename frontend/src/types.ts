@@ -48,6 +48,5 @@ export interface CustomModel {
 }
 
 export interface SystemConfig {
-  mineruApiKey: string;
   models: CustomModel[];
 }
