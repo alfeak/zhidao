@@ -55,22 +55,14 @@ copy .env.example .env  # Linux/macOS: cp .env.example .env
 uvicorn app.main:app --reload --port 8000
 ```
 
-在 `backend/.env` 中填写至少以下配置：
+在 `backend/.env` 中仅需填写 Google OAuth2 认证凭据：
 
 ```env
-MINERU_API_TOKEN=""
-
-R2_BUCKET=""
-R2_ACCESS_KEY_ID=""
-R2_SECRET_ACCESS_KEY=""
-# 二选一：R2_ACCOUNT_ID 或 R2_ENDPOINT_URL
-R2_ACCOUNT_ID=""
-R2_ENDPOINT_URL=""
-
-DEEPSEEK_API_KEY=""
-DEEPSEEK_BASE_URL="https://api.deepseek.com"
-DEEPSEEK_MODEL="deepseek-v4-pro"
+GOOGLE_CLIENT_ID="your_google_client_id"
+GOOGLE_CLIENT_SECRET="your_google_client_secret"
 ```
+
+> **注意**：MinerU 解析 Token、大模型 API Key / Model / BaseURL 及 Cloudflare R2 对象存储配置无需写在 `.env` 中，登录后通过页面右上角的【设置 (⚙️)】按钮进入设置弹窗，即可添加多 Profile 列表并选择主配置（Primary）。
 
 后端启动后可访问 `http://localhost:8000/docs` 查看接口文档。
 
