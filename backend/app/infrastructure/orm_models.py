@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 class Base(DeclarativeBase):
@@ -8,14 +8,6 @@ class SchemaMetadataRecord(Base):
     __tablename__ = "schema_metadata"
     key: Mapped[str] = mapped_column(String, primary_key=True)
     value: Mapped[str] = mapped_column(String, nullable=False)
-
-class ModelRecord(Base):
-    __tablename__ = "models"
-    id: Mapped[str] = mapped_column(String, primary_key=True)
-    name: Mapped[str] = mapped_column(String, nullable=False)
-    api_key: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    base_url: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 class DocumentRecord(Base):
     """Local metadata only; all MinerU output bytes live in object storage."""
@@ -75,10 +67,7 @@ class RemarkRecord(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)
     document_id: Mapped[str] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True)
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
-    # Canonical position in the source Markdown. It is language-independent,
-    # so the same remark can be rendered in original and translated views.
     block_index: Mapped[int | None] = mapped_column(Integer, index=True)
-    # Retained only for compatibility with databases created before block_index.
     block_id: Mapped[str] = mapped_column(String, nullable=False)
     comment: Mapped[str] = mapped_column(Text, nullable=False)
     color: Mapped[str] = mapped_column(String, nullable=False)
@@ -105,19 +94,11 @@ class UserSessionRecord(Base):
     user: Mapped[UserRecord] = relationship(back_populates="sessions")
 
 class UserSettingsRecord(Base):
+    """All service credentials stored as a single JSON blob (configs_json).
+    No legacy single-field columns — the new multi-profile design is the only source of truth.
+    """
     __tablename__ = "user_settings"
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
-    mineru_token: Mapped[str | None] = mapped_column(Text)
-    mineru_base_url: Mapped[str | None] = mapped_column(Text)
-    llm_model: Mapped[str | None] = mapped_column(Text)
-    llm_api_key: Mapped[str | None] = mapped_column(Text)
-    llm_base_url: Mapped[str | None] = mapped_column(Text)
-    r2_account_id: Mapped[str | None] = mapped_column(Text)
-    r2_bucket: Mapped[str | None] = mapped_column(Text)
-    r2_access_key_id: Mapped[str | None] = mapped_column(Text)
-    r2_secret_access_key: Mapped[str | None] = mapped_column(Text)
-    r2_endpoint_url: Mapped[str | None] = mapped_column(Text)
-    r2_prefix: Mapped[str | None] = mapped_column(Text)
     configs_json: Mapped[str | None] = mapped_column(Text)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
     user: Mapped[UserRecord] = relationship(back_populates="settings")

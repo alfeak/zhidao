@@ -1,11 +1,19 @@
-from sqlalchemy import select
 import hashlib
-import os
+import json
+from uuid import uuid4
+from sqlalchemy import select
 from .database import SessionLocal
-from .orm_models import DocumentRecord, DocumentArtifactRecord, TranslationJobRecord, ChatMessageRecord, RemarkRecord, ModelRecord
+from .orm_models import (
+    DocumentRecord, DocumentArtifactRecord, TranslationJobRecord,
+    ChatMessageRecord, RemarkRecord, UserSettingsRecord,
+)
 from ..domain.translation_languages import TRANSLATION_LANGUAGE_BY_CODE
 
 ACTIVE_TRANSLATION_STATUSES = {"pending", "processing"}
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def translation_job_dict(job):
     return {"targetLanguage": job.target_language, "status": job.status, "error": job.error, "createdAt": job.created_at, "updatedAt": job.updated_at}
@@ -34,37 +42,40 @@ def translation_language_from_path(path: str) -> str | None:
     stem = path.removesuffix(".md").rsplit(".", 1)[-1]
     return stem if stem in TRANSLATION_LANGUAGE_BY_CODE else None
 
+# ---------------------------------------------------------------------------
+# PaperRepository
+# ---------------------------------------------------------------------------
+
 class PaperRepository:
     def list(self):
         with SessionLocal() as s: return [document_dict(x) for x in s.scalars(select(DocumentRecord).order_by(DocumentRecord.imported_at.desc())).unique()]
     def get(self, id):
         with SessionLocal() as s:
-            x=s.get(DocumentRecord,id); return document_dict(x) if x else None
+            x = s.get(DocumentRecord, id); return document_dict(x) if x else None
     def get_by_url(self, source_url):
         with SessionLocal() as s:
-            x=s.scalar(select(DocumentRecord).where(DocumentRecord.source_url==source_url))
+            x = s.scalar(select(DocumentRecord).where(DocumentRecord.source_url == source_url))
             return document_dict(x) if x else None
     def create(self, p):
         with SessionLocal.begin() as s:
-            x=s.get(DocumentRecord, p["id"])
+            x = s.get(DocumentRecord, p["id"])
             if not x:
-                s.add(DocumentRecord(id=p["id"],title=p["title"],source_url=p["url"],imported_at=p["importedAt"]))
+                s.add(DocumentRecord(id=p["id"], title=p["title"], source_url=p["url"], imported_at=p["importedAt"]))
             else:
-                x.title=p["title"]
-                x.source_url=p["url"]
-                x.imported_at=p["importedAt"]
+                x.title = p["title"]; x.source_url = p["url"]; x.imported_at = p["importedAt"]
         return self.get(p["id"])
-    def set_status(self,id,status,error=None):
+    def set_status(self, id, status, error=None):
         with SessionLocal.begin() as s:
-            x=s.get(DocumentRecord,id)
-            if x: x.decode_status,x.decode_error=status,error
-    def save_artifacts(self,id, artifacts):
+            x = s.get(DocumentRecord, id)
+            if x: x.decode_status, x.decode_error = status, error
+    def save_artifacts(self, id, artifacts):
         with SessionLocal.begin() as s:
-            x=s.get(DocumentRecord,id)
-            if not x:return
-            x.decode_status,x.decode_error="done",None
+            x = s.get(DocumentRecord, id)
+            if not x: return
+            x.decode_status, x.decode_error = "done", None
             x.artifacts.clear()
-            for n,a in enumerate(artifacts): s.add(DocumentArtifactRecord(id=f"{id}_{n}",document_id=id,archive_path=a.archive_path,object_key=a.object_key,kind=artifact_kind(a),content_type=a.content_type,byte_size=a.byte_size,sha256=a.sha256,translation_language=translation_language_from_path(a.archive_path)))
+            for n, a in enumerate(artifacts):
+                s.add(DocumentArtifactRecord(id=f"{id}_{n}", document_id=id, archive_path=a.archive_path, object_key=a.object_key, kind=artifact_kind(a), content_type=a.content_type, byte_size=a.byte_size, sha256=a.sha256, translation_language=translation_language_from_path(a.archive_path)))
     def save_translation(self, id, artifact, language_code):
         with SessionLocal.begin() as s:
             existing = s.scalar(select(DocumentArtifactRecord).where(DocumentArtifactRecord.document_id == id, DocumentArtifactRecord.archive_path == artifact.archive_path))
@@ -93,182 +104,150 @@ class PaperRepository:
     def finish_translation(self, id, status, error, now):
         with SessionLocal.begin() as s:
             job = s.scalar(select(TranslationJobRecord).where(TranslationJobRecord.document_id == id))
-            if job:
-                job.status, job.error, job.updated_at = status, error, now
+            if job: job.status, job.error, job.updated_at = status, error, now
     def resume_translation_jobs(self, now):
         with SessionLocal.begin() as s:
             jobs = list(s.scalars(select(TranslationJobRecord).where(TranslationJobRecord.status.in_(ACTIVE_TRANSLATION_STATUSES))))
-            for job in jobs:
-                job.status, job.updated_at = "pending", now
+            for job in jobs: job.status, job.updated_at = "pending", now
             return [job.document_id for job in jobs]
-    def artifact(self,id,path):
-        with SessionLocal() as s:return s.scalar(select(DocumentArtifactRecord).where(DocumentArtifactRecord.document_id==id,DocumentArtifactRecord.archive_path==path))
-    def delete(self,id):
+    def artifact(self, id, path):
+        with SessionLocal() as s: return s.scalar(select(DocumentArtifactRecord).where(DocumentArtifactRecord.document_id == id, DocumentArtifactRecord.archive_path == path))
+    def delete(self, id):
         with SessionLocal.begin() as s:
-            x=s.get(DocumentRecord,id)
-            if not x:return False, None
-            prefix=x.object_prefix; s.delete(x); return True, prefix
+            x = s.get(DocumentRecord, id)
+            if not x: return False, None
+            prefix = x.object_prefix; s.delete(x); return True, prefix
 
-
-import json
+# ---------------------------------------------------------------------------
+# UserSettingsRepository
+# Source of truth: configs_json blob only. No legacy single-field columns.
+# ---------------------------------------------------------------------------
 
 class UserSettingsRepository:
     @staticmethod
-    def get_raw_user_settings(user_id: str | None) -> dict:
-        if not user_id:
-            return {}
-        from .orm_models import UserSettingsRecord
-        with SessionLocal() as s:
-            rec = s.get(UserSettingsRecord, user_id)
-            if not rec:
-                return {}
-            
-            stored = {}
-            if rec.configs_json:
-                try:
-                    stored = json.loads(rec.configs_json)
-                except Exception:
-                    stored = {}
-
-            mineru_configs = stored.get("mineruConfigs") or []
-            llm_configs = stored.get("llmConfigs") or []
-            r2_configs = stored.get("r2Configs") or []
-
-            # Determine primary item for each list
-            primary_mineru = next((c for c in mineru_configs if c.get("isPrimary")), mineru_configs[0] if mineru_configs else {})
-            primary_llm = next((c for c in llm_configs if c.get("isPrimary")), llm_configs[0] if llm_configs else {})
-            primary_r2 = next((c for c in r2_configs if c.get("isPrimary")), r2_configs[0] if r2_configs else {})
-
-            return {
-                "mineruConfigs": mineru_configs,
-                "llmConfigs": llm_configs,
-                "r2Configs": r2_configs,
-                "mineruToken": primary_mineru.get("mineruToken") or rec.mineru_token or "",
-                "mineruBaseUrl": primary_mineru.get("mineruBaseUrl") or rec.mineru_base_url or "",
-                "llmModel": primary_llm.get("llmModel") or rec.llm_model or "",
-                "llmApiKey": primary_llm.get("llmApiKey") or rec.llm_api_key or "",
-                "llmBaseUrl": primary_llm.get("llmBaseUrl") or rec.llm_base_url or "",
-                "r2AccountId": primary_r2.get("r2AccountId") or rec.r2_account_id or "",
-                "r2Bucket": primary_r2.get("r2Bucket") or rec.r2_bucket or "",
-                "r2AccessKeyId": primary_r2.get("r2AccessKeyId") or rec.r2_access_key_id or "",
-                "r2SecretAccessKey": primary_r2.get("r2SecretAccessKey") or rec.r2_secret_access_key or "",
-                "r2EndpointUrl": primary_r2.get("r2EndpointUrl") or rec.r2_endpoint_url or "",
-                "r2Prefix": primary_r2.get("r2Prefix") or rec.r2_prefix or "",
-            }
+    def _parse_configs(rec: UserSettingsRecord) -> dict:
+        """Return the raw configs dict stored in configs_json, or empty defaults."""
+        stored: dict = {}
+        if rec and rec.configs_json:
+            try:
+                stored = json.loads(rec.configs_json)
+            except Exception:
+                stored = {}
+        return stored
 
     @staticmethod
-    def get_user_settings(user_id: str | None) -> dict:
-        return UserSettingsRepository.get_raw_user_settings(user_id)
+    def get_user_settings(user_id: str) -> dict:
+        """Return full settings for the given user.
+
+        Flat convenience fields (llmApiKey, mineruToken, …) are derived from
+        the primary entry in each *Configs list so callers don't need to know
+        about the list structure.
+        """
+        with SessionLocal() as s:
+            rec = s.get(UserSettingsRecord, user_id)
+
+        stored = UserSettingsRepository._parse_configs(rec)
+
+        mineru_configs: list[dict] = stored.get("mineruConfigs") or []
+        llm_configs: list[dict] = stored.get("llmConfigs") or []
+        r2_configs: list[dict] = stored.get("r2Configs") or []
+
+        primary_mineru = next((c for c in mineru_configs if c.get("isPrimary")), mineru_configs[0] if mineru_configs else {})
+        primary_llm    = next((c for c in llm_configs    if c.get("isPrimary")), llm_configs[0]    if llm_configs    else {})
+        primary_r2     = next((c for c in r2_configs     if c.get("isPrimary")), r2_configs[0]     if r2_configs     else {})
+
+        return {
+            "mineruConfigs": mineru_configs,
+            "llmConfigs":    llm_configs,
+            "r2Configs":     r2_configs,
+            # Flat convenience fields derived from the primary config
+            "mineruToken":        primary_mineru.get("mineruToken") or "",
+            "mineruBaseUrl":      primary_mineru.get("mineruBaseUrl") or "",
+            "llmModel":           primary_llm.get("llmModel") or "",
+            "llmApiKey":          primary_llm.get("llmApiKey") or "",
+            "llmBaseUrl":         primary_llm.get("llmBaseUrl") or "",
+            "r2AccountId":        primary_r2.get("r2AccountId") or "",
+            "r2Bucket":           primary_r2.get("r2Bucket") or "",
+            "r2AccessKeyId":      primary_r2.get("r2AccessKeyId") or "",
+            "r2SecretAccessKey":  primary_r2.get("r2SecretAccessKey") or "",
+            "r2EndpointUrl":      primary_r2.get("r2EndpointUrl") or "",
+            "r2Prefix":           primary_r2.get("r2Prefix") or "",
+        }
 
     @staticmethod
     def update_user_settings(user_id: str, payload: dict) -> dict:
-        if not user_id:
-            return {}
-        from .orm_models import UserSettingsRecord
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc).isoformat()
-        
-        existing_raw = UserSettingsRepository.get_raw_user_settings(user_id)
+
+        existing = UserSettingsRepository.get_user_settings(user_id)
+
+        mineru_configs = payload.get("mineruConfigs") or existing.get("mineruConfigs") or []
+        llm_configs    = payload.get("llmConfigs")    or existing.get("llmConfigs")    or []
+        r2_configs     = payload.get("r2Configs")     or existing.get("r2Configs")     or []
+
+        # Restore masked sensitive values
+        def restore_mineru(c):
+            ex = next((e for e in existing.get("mineruConfigs", []) if e.get("id") == c.get("id")), {})
+            token = c.get("mineruToken", "")
+            if str(token).startswith("•••"):
+                token = ex.get("mineruToken") or ""
+            return {**c, "mineruToken": token}
+
+        def restore_llm(c):
+            ex = next((e for e in existing.get("llmConfigs", []) if e.get("id") == c.get("id")), {})
+            key = c.get("llmApiKey", "")
+            if str(key).startswith("•••"):
+                key = ex.get("llmApiKey") or ""
+            return {**c, "llmApiKey": key}
+
+        def restore_r2(c):
+            ex = next((e for e in existing.get("r2Configs", []) if e.get("id") == c.get("id")), {})
+            secret = c.get("r2SecretAccessKey", "")
+            if str(secret).startswith("•••"):
+                secret = ex.get("r2SecretAccessKey") or ""
+            return {**c, "r2SecretAccessKey": secret}
+
+        mineru_configs = [restore_mineru(c) for c in mineru_configs]
+        llm_configs    = [restore_llm(c)    for c in llm_configs]
+        r2_configs     = [restore_r2(c)     for c in r2_configs]
+
+        new_json = json.dumps({"mineruConfigs": mineru_configs, "llmConfigs": llm_configs, "r2Configs": r2_configs}, ensure_ascii=False)
 
         with SessionLocal.begin() as s:
             rec = s.get(UserSettingsRecord, user_id)
             if not rec:
                 rec = UserSettingsRecord(user_id=user_id, updated_at=now)
                 s.add(rec)
-
-            mineru_configs = payload.get("mineruConfigs") or existing_raw.get("mineruConfigs") or []
-            llm_configs = payload.get("llmConfigs") or existing_raw.get("llmConfigs") or []
-            r2_configs = payload.get("r2Configs") or existing_raw.get("r2Configs") or []
-
-            # Preserve masked keys if payload contains masked placeholder
-            def restore_masked_mineru(c):
-                existing = next((e for e in existing_raw.get("mineruConfigs", []) if e.get("id") == c.get("id")), {})
-                token = c.get("mineruToken", "")
-                if str(token).startswith("•••"):
-                    token = existing.get("mineruToken") or rec.mineru_token or ""
-                return {**c, "mineruToken": token}
-
-            def restore_masked_llm(c):
-                existing = next((e for e in existing_raw.get("llmConfigs", []) if e.get("id") == c.get("id")), {})
-                key = c.get("llmApiKey", "")
-                if str(key).startswith("•••"):
-                    key = existing.get("llmApiKey") or rec.llm_api_key or ""
-                return {**c, "llmApiKey": key}
-
-            def restore_masked_r2(c):
-                existing = next((e for e in existing_raw.get("r2Configs", []) if e.get("id") == c.get("id")), {})
-                secret = c.get("r2SecretAccessKey", "")
-                if str(secret).startswith("•••"):
-                    secret = existing.get("r2SecretAccessKey") or rec.r2_secret_access_key or ""
-                return {**c, "r2SecretAccessKey": secret}
-
-            mineru_configs = [restore_masked_mineru(c) for c in mineru_configs]
-            llm_configs = [restore_masked_llm(c) for c in llm_configs]
-            r2_configs = [restore_masked_r2(c) for c in r2_configs]
-
-            rec.configs_json = json.dumps({
-                "mineruConfigs": mineru_configs,
-                "llmConfigs": llm_configs,
-                "r2Configs": r2_configs,
-            }, ensure_ascii=False)
-
-            primary_mineru = next((c for c in mineru_configs if c.get("isPrimary")), mineru_configs[0] if mineru_configs else {})
-            primary_llm = next((c for c in llm_configs if c.get("isPrimary")), llm_configs[0] if llm_configs else {})
-            primary_r2 = next((c for c in r2_configs if c.get("isPrimary")), r2_configs[0] if r2_configs else {})
-
-            rec.mineru_token = primary_mineru.get("mineruToken") or ""
-            rec.mineru_base_url = primary_mineru.get("mineruBaseUrl") or ""
-            rec.llm_model = primary_llm.get("llmModel") or ""
-            rec.llm_api_key = primary_llm.get("llmApiKey") or ""
-            rec.llm_base_url = primary_llm.get("llmBaseUrl") or ""
-            rec.r2_account_id = primary_r2.get("r2AccountId") or ""
-            rec.r2_bucket = primary_r2.get("r2Bucket") or ""
-            rec.r2_access_key_id = primary_r2.get("r2AccessKeyId") or ""
-            rec.r2_secret_access_key = primary_r2.get("r2SecretAccessKey") or ""
-            rec.r2_endpoint_url = primary_r2.get("r2EndpointUrl") or ""
-            rec.r2_prefix = primary_r2.get("r2Prefix") or ""
+            rec.configs_json = new_json
             rec.updated_at = now
 
         return UserSettingsRepository.get_user_settings(user_id)
 
+# ---------------------------------------------------------------------------
+# ConfigRepository
+# ---------------------------------------------------------------------------
+
 class ConfigRepository:
-    def get(self, masked=True):
-        return self.get_for_user(None, masked)
-
-    def get_for_user(self, user_id: str | None = None, masked: bool = True):
+    def get_for_user(self, user_id: str | None = None, masked: bool = True) -> dict:
         user_settings = UserSettingsRepository.get_user_settings(user_id) if user_id else {}
-        
-        api_key = user_settings.get("llmApiKey") or ""
-        model_name = user_settings.get("llmModel") or ""
-        base_url = user_settings.get("llmBaseUrl") or ""
 
-        mineru_token = user_settings.get("mineruToken") or ""
-        mineru_base_url = user_settings.get("mineruBaseUrl") or ""
-
-        r2_account_id = user_settings.get("r2AccountId") or ""
-        r2_bucket = user_settings.get("r2Bucket") or ""
-        r2_access_key_id = user_settings.get("r2AccessKeyId") or ""
-        r2_secret_access_key = user_settings.get("r2SecretAccessKey") or ""
-        r2_endpoint_url = user_settings.get("r2EndpointUrl") or ""
-        r2_prefix = user_settings.get("r2Prefix") or ""
+        llm_configs    = user_settings.get("llmConfigs")    or []
+        mineru_configs = user_settings.get("mineruConfigs") or []
+        r2_configs     = user_settings.get("r2Configs")     or []
 
         def mask_val(v):
             return "••••••••" if masked and v else v
 
-        mineru_configs = user_settings.get("mineruConfigs") or []
-        llm_configs = user_settings.get("llmConfigs") or []
-        r2_configs = user_settings.get("r2Configs") or []
+        masked_llm_configs    = [{**c, "llmApiKey":         mask_val(c.get("llmApiKey", ""))}         for c in llm_configs]
+        masked_mineru_configs = [{**c, "mineruToken":       mask_val(c.get("mineruToken", ""))}       for c in mineru_configs]
+        masked_r2_configs     = [{**c, "r2SecretAccessKey": mask_val(c.get("r2SecretAccessKey", ""))} for c in r2_configs]
 
-        # Mask sensitive keys in configs list if requested
-        masked_mineru_configs = [{**c, "mineruToken": mask_val(c.get("mineruToken", ""))} for c in mineru_configs]
-        masked_llm_configs = [{**c, "llmApiKey": mask_val(c.get("llmApiKey", ""))} for c in llm_configs]
-        masked_r2_configs = [{**c, "r2SecretAccessKey": mask_val(c.get("r2SecretAccessKey", ""))} for c in r2_configs]
-
+        # Build the models list consumed by OpenAICompatibleGateway
         models_list = [{
-            "id": c.get("id", "llm"),
-            "name": c.get("llmModel") or model_name,
-            "apiKey": mask_val(c.get("llmApiKey") or api_key) if masked else (c.get("llmApiKey") or api_key),
-            "baseUrl": c.get("llmBaseUrl") or base_url,
+            "id":        c.get("id", "llm"),
+            "name":      c.get("llmModel") or "",
+            "apiKey":    mask_val(c.get("llmApiKey") or "") if masked else (c.get("llmApiKey") or ""),
+            "baseUrl":   c.get("llmBaseUrl") or "",
             "isPrimary": bool(c.get("isPrimary")),
         } for c in llm_configs]
 
@@ -276,30 +255,32 @@ class ConfigRepository:
             models_list[0]["isPrimary"] = True
 
         return {
+            "llmConfigs":    masked_llm_configs,
             "mineruConfigs": masked_mineru_configs,
-            "llmConfigs": masked_llm_configs,
-            "r2Configs": masked_r2_configs,
-            "mineruToken": mask_val(mineru_token),
-            "mineruBaseUrl": mineru_base_url,
-            "llmModel": model_name,
-            "llmApiKey": mask_val(api_key),
-            "llmBaseUrl": base_url,
-            "r2AccountId": r2_account_id,
-            "r2Bucket": r2_bucket,
-            "r2AccessKeyId": r2_access_key_id,
-            "r2SecretAccessKey": mask_val(r2_secret_access_key),
-            "r2EndpointUrl": r2_endpoint_url,
-            "r2Prefix": r2_prefix,
-            "models": models_list,
+            "r2Configs":     masked_r2_configs,
+            # Flat convenience fields (derived from primary)
+            "llmModel":          user_settings.get("llmModel") or "",
+            "llmApiKey":         mask_val(user_settings.get("llmApiKey") or ""),
+            "llmBaseUrl":        user_settings.get("llmBaseUrl") or "",
+            "mineruToken":       mask_val(user_settings.get("mineruToken") or ""),
+            "mineruBaseUrl":     user_settings.get("mineruBaseUrl") or "",
+            "r2AccountId":       user_settings.get("r2AccountId") or "",
+            "r2Bucket":          user_settings.get("r2Bucket") or "",
+            "r2AccessKeyId":     user_settings.get("r2AccessKeyId") or "",
+            "r2SecretAccessKey": mask_val(user_settings.get("r2SecretAccessKey") or ""),
+            "r2EndpointUrl":     user_settings.get("r2EndpointUrl") or "",
+            "r2Prefix":          user_settings.get("r2Prefix") or "",
+            "models":            models_list,
         }
 
-    def update_for_user(self, user_id: str | None, payload: dict):
+    def update_for_user(self, user_id: str | None, payload: dict) -> dict:
         if user_id:
             UserSettingsRepository.update_user_settings(user_id, payload)
         return self.get_for_user(user_id, masked=True)
 
-    def update(self, payload):
-        return self.get()
+# ---------------------------------------------------------------------------
+# CollaborationRepository
+# ---------------------------------------------------------------------------
 
 class CollaborationRepository:
     def messages(self, paper_id, user_id: str | None = None):
@@ -316,7 +297,7 @@ class CollaborationRepository:
     def add_message(self, message, user_id: str | None = None):
         with SessionLocal.begin() as session:
             record = ChatMessageRecord(
-                id=message.get("id", f"msg_{uuid.uuid4().hex[:12]}"),
+                id=message.get("id", f"msg_{uuid4().hex[:12]}"),
                 document_id=message["paperId"],
                 user_id=user_id,
                 role=message["role"],
@@ -336,21 +317,11 @@ class CollaborationRepository:
 
     @staticmethod
     def remark_dict(remark):
-        return {
-            "id": remark.id,
-            "paperId": remark.document_id,
-            "blockIndex": remark.block_index,
-            "comment": remark.comment,
-            "color": remark.color,
-            "createdAt": remark.created_at,
-        }
+        return {"id": remark.id, "paperId": remark.document_id, "blockIndex": remark.block_index, "comment": remark.comment, "color": remark.color, "createdAt": remark.created_at}
 
     def remarks(self, paper_id, user_id: str | None = None):
         with SessionLocal() as session:
-            stmt = select(RemarkRecord).where(
-                RemarkRecord.document_id == paper_id,
-                RemarkRecord.block_index.is_not(None)
-            )
+            stmt = select(RemarkRecord).where(RemarkRecord.document_id == paper_id, RemarkRecord.block_index.is_not(None))
             if user_id:
                 stmt = stmt.where(RemarkRecord.user_id == user_id)
             records = session.scalars(stmt.order_by(RemarkRecord.block_index, RemarkRecord.created_at))
@@ -383,5 +354,3 @@ class CollaborationRepository:
                 return False
             session.delete(record)
             return True
-
-
