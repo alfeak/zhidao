@@ -41,12 +41,12 @@ export default function LandingPage({ googleClientId, onGoogleLogin }: Props) {
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
 
-    // Generate points on an ellipsoid surface with uniform spherical sampling
-    const pointCount = 450;
+    // Generate points on a larger ellipsoid surface
+    const pointCount = 550;
     const points: Array<{ x: number; y: number; z: number; baseAlpha: number }> = [];
-    const rx = 280;
-    const ry = 170;
-    const rz = 220;
+    const rx = 380;
+    const ry = 220;
+    const rz = 280;
 
     for (let i = 0; i < pointCount; i++) {
       const phi = Math.acos(1 - 2 * Math.random()) - Math.PI / 2;
@@ -67,7 +67,8 @@ export default function LandingPage({ googleClientId, onGoogleLogin }: Props) {
     const render = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       const centerX = canvas.width / 2;
-      const centerY = canvas.height / 2;
+      // Shift center upward so the bottom of the ellipsoid aligns near the "知道" title
+      const centerY = canvas.height * 0.24;
 
       angleX += 0.0006;
       angleY += 0.0012;
@@ -115,12 +116,11 @@ export default function LandingPage({ googleClientId, onGoogleLogin }: Props) {
 
       for (const p of projectedPoints) {
         const alpha = Math.max(0.1, Math.min(1, ((p.z + rz) / (rz * 2)) * p.baseAlpha));
-        const radius = Math.max(0.8, 1.8 * p.scale);
+        const radius = Math.max(0.8, 2.0 * p.scale);
 
         ctx.beginPath();
         ctx.arc(p.screenX, p.screenY, radius, 0, Math.PI * 2);
 
-        // Cyan to Indigo gradient points
         if (p.z > 0) {
           ctx.fillStyle = `rgba(56, 189, 248, ${alpha})`;
         } else {
@@ -205,7 +205,7 @@ export default function LandingPage({ googleClientId, onGoogleLogin }: Props) {
   return (
     <div className="relative flex min-h-screen w-full flex-col items-center justify-center overflow-hidden bg-slate-950 text-slate-100 font-sans">
       {/* 3D Slowly Evolving Ellipsoid Point Cloud Canvas Background */}
-      <canvas ref={canvasRef} className="pointer-events-none absolute inset-0 z-0 h-full w-full opacity-60" />
+      <canvas ref={canvasRef} className="pointer-events-none absolute inset-0 z-0 h-full w-full opacity-65" />
 
       {/* Dynamic Animated Ambient Background Glow Blobs */}
       <div className="pointer-events-none absolute -top-40 -left-40 h-[500px] w-[500px] rounded-full bg-gradient-to-br from-cyan-500/20 via-sky-600/10 to-transparent blur-3xl animate-pulse" style={{ animationDuration: '8s' }} />
@@ -255,6 +255,11 @@ export default function LandingPage({ googleClientId, onGoogleLogin }: Props) {
             )}
           </div>
         </div>
+
+        {/* Restored Footer Info */}
+        <footer className="mt-12 text-center text-xs text-slate-600">
+          © 2026 知道 (Zhidao) • 智能文献阅读平台
+        </footer>
       </main>
     </div>
   );
