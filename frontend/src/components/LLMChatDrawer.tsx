@@ -73,7 +73,7 @@ export default function LLMChatDrawer({ paper, user, isOpen }: Props) {
         setMessages((prev) => [...prev, assistantMsg]);
       } else {
         const errJson = await response.json().catch(() => ({}));
-        const errMsgText = errJson.detail || errJson.message || '请检查后台大模型 API Key / URL 配置。';
+        const errMsgText = errJson.detail || errJson.error || errJson.message || '请检查后台大模型 API Key / URL 配置。';
         const errorMsg: ChatMessage = {
           id: `temp_err_${Date.now()}`,
           paperId: paper.id,

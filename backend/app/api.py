@@ -91,8 +91,8 @@ async def test_model(request: Request, payload: dict = Body(...), zhidao_session
     
     api_key = payload.get("apiKey") or payload.get("llmApiKey")
     if not api_key or str(api_key).startswith("•••"):
-        api_key = user_cfg.get("llmApiKey") or os.getenv("DEEPSEEK_API_KEY", "").strip()
-    model_name = payload.get("name") or payload.get("model") or payload.get("llmModel") or user_cfg.get("llmModel") or "deepseek-v4-pro"
+        api_key = user_cfg.get("llmApiKey") or ""
+    model_name = payload.get("name") or payload.get("model") or payload.get("llmModel") or user_cfg.get("llmModel") or ""
     base_url = payload.get("baseUrl") or payload.get("llmBaseUrl") or user_cfg.get("llmBaseUrl") or "https://api.deepseek.com"
 
     if not api_key:

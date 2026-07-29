@@ -30,11 +30,11 @@ app.add_middleware(
 
 @app.exception_handler(NotFoundError)
 async def not_found(_: Request, error: NotFoundError):
-    return JSONResponse(status_code=404, content={"error": str(error)})
+    return JSONResponse(status_code=404, content={"detail": str(error), "error": str(error), "message": str(error)})
 
 @app.exception_handler(ValidationError)
 async def invalid(_: Request, error: ValidationError):
-    return JSONResponse(status_code=400, content={"error": str(error)})
+    return JSONResponse(status_code=400, content={"detail": str(error), "error": str(error), "message": str(error)})
 
 @app.get("/health")
 def health():
