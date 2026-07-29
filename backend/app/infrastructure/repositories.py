@@ -187,27 +187,35 @@ class UserSettingsRepository:
         llm_configs    = payload.get("llmConfigs")    or existing.get("llmConfigs")    or []
         r2_configs     = payload.get("r2Configs")     or existing.get("r2Configs")     or []
 
-        # Restore masked sensitive values
+        # Restore masked sensitive values and trim accidental whitespace from pasted credentials
         def restore_mineru(c):
             ex = next((e for e in existing.get("mineruConfigs", []) if e.get("id") == c.get("id")), {})
             token = c.get("mineruToken", "")
             if str(token).startswith("•••"):
                 token = ex.get("mineruToken") or ""
-            return {**c, "mineruToken": token}
+            return {**c, "mineruToken": str(token).strip(), "mineruBaseUrl": str(c.get("mineruBaseUrl") or "").strip()}
 
         def restore_llm(c):
             ex = next((e for e in existing.get("llmConfigs", []) if e.get("id") == c.get("id")), {})
             key = c.get("llmApiKey", "")
             if str(key).startswith("•••"):
                 key = ex.get("llmApiKey") or ""
-            return {**c, "llmApiKey": key}
+            return {**c, "llmApiKey": str(key).strip(), "llmBaseUrl": str(c.get("llmBaseUrl") or "").strip(), "llmModel": str(c.get("llmModel") or "").strip()}
 
         def restore_r2(c):
             ex = next((e for e in existing.get("r2Configs", []) if e.get("id") == c.get("id")), {})
             secret = c.get("r2SecretAccessKey", "")
             if str(secret).startswith("•••"):
                 secret = ex.get("r2SecretAccessKey") or ""
-            return {**c, "r2SecretAccessKey": secret}
+            return {
+                **c,
+                "r2SecretAccessKey": str(secret).strip(),
+                "r2AccessKeyId": str(c.get("r2AccessKeyId") or "").strip(),
+                "r2Bucket": str(c.get("r2Bucket") or "").strip(),
+                "r2AccountId": str(c.get("r2AccountId") or "").strip(),
+                "r2EndpointUrl": str(c.get("r2EndpointUrl") or "").strip(),
+                "r2Prefix": str(c.get("r2Prefix") or "").strip(),
+            }
 
         mineru_configs = [restore_mineru(c) for c in mineru_configs]
         llm_configs    = [restore_llm(c)    for c in llm_configs]
