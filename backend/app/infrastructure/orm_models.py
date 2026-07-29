@@ -82,3 +82,21 @@ class RemarkRecord(Base):
     color: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     document: Mapped[DocumentRecord] = relationship(back_populates="remarks")
+
+class UserRecord(Base):
+    __tablename__ = "users"
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    google_sub: Mapped[str] = mapped_column(String, unique=True, index=True, nullable=False)
+    email: Mapped[str] = mapped_column(String, unique=True, index=True, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    picture: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    last_login_at: Mapped[str] = mapped_column(String, nullable=False)
+    sessions: Mapped[list["UserSessionRecord"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+
+class UserSessionRecord(Base):
+    __tablename__ = "user_sessions"
+    session_id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    expires_at: Mapped[str] = mapped_column(String, nullable=False)
+    user: Mapped[UserRecord] = relationship(back_populates="sessions")

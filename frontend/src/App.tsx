@@ -4,9 +4,19 @@ import { HighlightRemark, MarkdownBlock, TranslationLanguage } from './types';
 import ImportModule from './components/ImportModule';
 import PaperList from './components/PaperList';
 import ReaderCore from './components/ReaderCore';
+import LandingPage from './components/LandingPage';
+import UserMenu from './components/UserMenu';
 import { usePaperWorkspace } from './hooks/usePaperWorkspace';
+import { useAuth } from './hooks/useAuth';
 
 export default function App() {
+  const {
+    user,
+    loading: authLoading,
+    googleClientId,
+    loginWithGoogle,
+    logout,
+  } = useAuth();
   const {
     papers,
     activePaper,
@@ -101,6 +111,28 @@ export default function App() {
     }
   };
 
+  if (authLoading) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-slate-950 text-slate-400 font-sans">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-cyan-400 border-t-transparent" />
+          <span className="text-xs font-mono tracking-widest text-slate-500">ZHIDAO AUTHENTICATING...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <LandingPage
+        googleClientId={googleClientId}
+        onGoogleLogin={async (credential) => {
+          await loginWithGoogle(credential);
+        }}
+      />
+    );
+  }
+
   return (
     <div className="h-screen w-screen flex flex-col min-h-0 overflow-hidden bg-white font-sans text-gray-800 transition-colors duration-300 dark:bg-slate-950 dark:text-slate-100">
       <header className="relative z-10 flex h-16 shrink-0 items-center justify-between border-b border-gray-200 bg-white px-5 select-none dark:border-slate-800 dark:bg-slate-900">
@@ -109,9 +141,12 @@ export default function App() {
           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-slate-800 dark:bg-slate-200" />
           {time || '00:00:00'}
         </div>
-        <button onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')} className="flex items-center justify-center rounded-md bg-gray-100 p-1.5 text-gray-700 transition-colors hover:bg-gray-200 dark:bg-slate-800 dark:text-gray-300 dark:hover:bg-slate-700" title="切换主题">
-          {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4 text-amber-400" />}
-        </button>
+        <div className="flex items-center gap-3">
+          <UserMenu user={user} onLogout={logout} />
+          <button onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')} className="flex items-center justify-center rounded-md bg-gray-100 p-1.5 text-gray-700 transition-colors hover:bg-gray-200 dark:bg-slate-800 dark:text-gray-300 dark:hover:bg-slate-700" title="切换主题">
+            {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4 text-amber-400" />}
+          </button>
+        </div>
       </header>
 
       <div className="relative flex min-h-0 flex-1">

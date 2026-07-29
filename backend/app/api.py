@@ -1,5 +1,6 @@
-from fastapi import APIRouter, BackgroundTasks, Body, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Body, HTTPException, Query, Request, Response, Cookie
 from .application.services import PaperService
+from .application.auth_service import AuthService
 from .domain.errors import NotFoundError, ValidationError
 from fastapi.responses import StreamingResponse
 from .infrastructure.repositories import ConfigRepository
@@ -8,6 +9,53 @@ from .domain.translation_languages import TRANSLATION_LANGUAGES
 router = APIRouter(prefix="/api")
 papers = PaperService()
 config = ConfigRepository()
+auth_service = AuthService()
+
+def extract_session_id(request: Request, cookie_session: str | None = None) -> str | None:
+    if cookie_session:
+        return cookie_session
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        return auth_header[7:].strip()
+    return None
+
+@router.get("/auth/config")
+def get_auth_config():
+    return {"clientId": auth_service.get_google_client_id()}
+
+@router.post("/auth/google")
+async def google_login(response: Response, payload: dict = Body(...)):
+    credential = payload.get("credential")
+    if not credential:
+        raise ValidationError("Google credential token is required")
+    try:
+        result = await auth_service.authenticate_google_user(credential)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
+    response.set_cookie(
+        key="zhidao_session",
+        value=result["sessionId"],
+        httponly=True,
+        max_age=30 * 86400,
+        samesite="lax",
+        path="/",
+    )
+    return {"success": True, "user": result["user"], "sessionId": result["sessionId"]}
+
+@router.get("/auth/me")
+def get_current_user(request: Request, zhidao_session: str | None = Cookie(None)):
+    session_id = extract_session_id(request, zhidao_session)
+    user = auth_service.get_user_by_session(session_id) if session_id else None
+    return {"user": user}
+
+@router.post("/auth/logout")
+def logout(request: Request, response: Response, zhidao_session: str | None = Cookie(None)):
+    session_id = extract_session_id(request, zhidao_session)
+    if session_id:
+        auth_service.logout_session(session_id)
+    response.delete_cookie(key="zhidao_session", path="/")
+    return {"success": True}
 
 def require(value, name):
     if not value: raise ValidationError(f"{name} is required")
