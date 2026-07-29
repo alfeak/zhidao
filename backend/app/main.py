@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 from contextlib import asynccontextmanager
+import asyncio
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -14,6 +15,7 @@ from .infrastructure.database import initialize_database
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     initialize_database()
+    await asyncio.to_thread(papers.rebuild_search_indexes)
     await papers.recover_translation_jobs()
     yield
 

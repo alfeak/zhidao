@@ -13,6 +13,9 @@ def initialize_database():
         with engine.begin() as conn:
             for name in names: conn.exec_driver_sql(f'DROP TABLE IF EXISTS "{name}"')
     Base.metadata.create_all(engine)
+    # FTS5 virtual tables are not managed by SQLAlchemy metadata.
+    from .search_index import SearchIndex
+    SearchIndex.initialize()
     # create_all does not add columns to an existing SQLite table. Keep this
     # small compatibility migration here because the application bootstraps its
     # schema directly in local and Docker deployments.

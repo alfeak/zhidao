@@ -11,13 +11,14 @@ from ..infrastructure.mineru_client import MinerUClient
 from ..infrastructure.object_store import R2ObjectStore
 from ..infrastructure.repositories import PaperRepository, ConfigRepository, CollaborationRepository
 from ..infrastructure.openai_gateway import OpenAICompatibleGateway
+from ..infrastructure.search_index import SearchIndex
 from .paper_title_resolver import PaperTitleResolver
 
 class PaperService:
     def __init__(self):
         self.papers, self.config, self.collaboration = PaperRepository(), ConfigRepository(), CollaborationRepository()
         self.mineru = MinerUClient(); self.title_resolver = PaperTitleResolver()
-        self.llm = OpenAICompatibleGateway()
+        self.llm = OpenAICompatibleGateway(); self.search_index = SearchIndex()
         self._translation_tasks: dict[str, asyncio.Task] = {}
 
     @staticmethod
@@ -46,6 +47,7 @@ class PaperService:
         # 1. Check if paper already exists in DB and is decoded
         existing = self.papers.get(paper_id)
         if existing and existing.get("isDecoded"):
+            self.reindex_paper(paper_id)
             return existing
 
         # 2. Check if R2 storage already contains cached artifacts for this paper URL
@@ -60,14 +62,18 @@ class PaperService:
         if has_markdown:
             self.papers.create({"id": paper_id, "title": r.title, "url": r.url, "importedAt": self.now()})
             self.papers.save_artifacts(paper_id, cached_artifacts)
+            self.reindex_paper(paper_id)
             return self.papers.get(paper_id)
 
         # 4. If R2 cache miss, create initial paper record for background MinerU decoding
-        return self.papers.create({"id": paper_id, "title": r.title, "url": r.url, "importedAt": self.now()})
+        created = self.papers.create({"id": paper_id, "title": r.title, "url": r.url, "importedAt": self.now()})
+        self.reindex_paper(paper_id)
+        return created
 
     def delete_paper(self, id):
         found, prefix = self.papers.delete(id)
         if not found: raise NotFoundError("Paper not found")
+        self.search_index.delete_paper(id)
         # R2 objects are intentionally retained so re-importing the URL reuses cached parsing results.
 
     def start_decoding(self, id):
@@ -87,10 +93,12 @@ class PaperService:
                 cached_artifacts = []
             if any(a.archive_path.endswith(".md") and not a.archive_path.startswith("translations/") for a in cached_artifacts):
                 self.papers.save_artifacts(id, cached_artifacts)
+                self.reindex_paper(id)
                 return
 
             result = await self.mineru.parse_url(paper["url"])
             self.papers.save_artifacts(id, R2ObjectStore().put_archive(id, result.files))
+            self.reindex_paper(id)
         except Exception as e:
             self.papers.set_status(id, "failed", str(e))
 
@@ -241,6 +249,65 @@ class PaperService:
         if not artifact or artifact.kind != "translation": raise NotFoundError("Translation was not found.")
         return R2ObjectStore().read(artifact.object_key).decode("utf-8"), artifact
 
+    @staticmethod
+    def _fallback_search_blocks(content: str) -> list[dict]:
+        sections = [part.strip() for part in re.split(r"(?=^#{1,6}\s)", content, flags=re.MULTILINE) if part.strip()]
+        return [{"index": index, "content": section} for index, section in enumerate(sections or [content])]
+
+    def reindex_paper(self, id: str) -> None:
+        """Replace all searchable material for one paper atomically."""
+        paper = self.papers.get(id)
+        if not paper:
+            self.search_index.delete_paper(id)
+            return
+        title = paper["title"]
+        documents = [{"source": "paper", "title": title, "content": f"{title}\n{paper['url']}"}]
+        if paper.get("isDecoded"):
+            source_blocks = self.markdown_blocks(id)
+            if not source_blocks:
+                try:
+                    markdown, _ = self.markdown(id)
+                    source_blocks = self._fallback_search_blocks(markdown)
+                except Exception:
+                    source_blocks = []
+            # The MinerU reading-order blocks are the textual representation of
+            # the parsed PDF; index them separately from Markdown by design.
+            for source in ("pdf", "markdown"):
+                documents.extend({
+                    "source": source,
+                    "title": title,
+                    "blockIndex": block.get("index"),
+                    "pageIndex": block.get("pageIndex"),
+                    "content": block.get("content", ""),
+                } for block in source_blocks)
+            for translation in paper.get("translations", []):
+                language = translation["targetLanguage"]
+                try:
+                    translated, _ = self.translated_markdown(id, language)
+                    blocks = self.translated_markdown_blocks(id, language) or self._fallback_search_blocks(translated)
+                except Exception:
+                    continue
+                documents.extend({
+                    "source": "translate",
+                    "language": language,
+                    "title": title,
+                    "blockIndex": block.get("index"),
+                    "pageIndex": block.get("pageIndex"),
+                    "content": block.get("content", ""),
+                } for block in blocks)
+        self.search_index.replace_paper(id, documents)
+
+    def rebuild_search_indexes(self) -> None:
+        for paper in self.papers.list():
+            try:
+                self.reindex_paper(paper["id"])
+            except Exception:
+                # A temporary R2 issue must not prevent the application booting.
+                continue
+
+    def search(self, query: str, limit: int = 30) -> list[dict]:
+        return self.search_index.search(query, limit)
+
     async def translate_markdown(self, id: str, target_language: str):
         paper = self.paper(id)
         language = self.translation_language(target_language)
@@ -259,6 +326,7 @@ class PaperService:
         if not translated.strip(): raise ValidationError("The translation model returned an empty document.")
         stored = R2ObjectStore().put(id, archive_path, translated.encode("utf-8"))
         self.papers.save_translation(id, stored, language["code"])
+        self.reindex_paper(id)
         return {"paperId": paper["id"], "targetLanguage": language["code"], "archivePath": archive_path, "content": translated}
 
     async def enqueue_translation(self, id: str, target_language: str):

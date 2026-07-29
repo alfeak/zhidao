@@ -49,6 +49,12 @@ export interface TranslationLanguage {
   name: string;
 }
 
+export interface PaperSearchResult {
+  paperId: string;
+  title: string;
+  sources: Array<{ source: 'paper' | 'pdf' | 'markdown' | 'translate'; language?: string | null }>;
+}
+
 export interface ChatMessage {
   id: string;
   paperId: string;

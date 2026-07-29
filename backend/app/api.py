@@ -18,6 +18,10 @@ def get_config(): return config.get(masked=True)
 @router.get("/translation-languages")
 def get_translation_languages(): return {"languages": TRANSLATION_LANGUAGES}
 
+@router.get("/search")
+def search_papers(q: str = Query(..., min_length=1), limit: int = Query(30, ge=1, le=100)):
+    return {"results": papers.search(q, limit)}
+
 @router.post("/config")
 def update_config(payload: dict = Body(...)):
     return {"success": True, "config": config.update(payload)}
