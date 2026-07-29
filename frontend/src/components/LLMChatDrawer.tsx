@@ -72,17 +72,27 @@ export default function LLMChatDrawer({ paper, user, isOpen }: Props) {
         const assistantMsg = await response.json();
         setMessages((prev) => [...prev, assistantMsg]);
       } else {
+        const errJson = await response.json().catch(() => ({}));
+        const errMsgText = errJson.detail || errJson.message || '请检查后台大模型 API Key / URL 配置。';
         const errorMsg: ChatMessage = {
           id: `temp_err_${Date.now()}`,
           paperId: paper.id,
           role: 'assistant',
-          content: '⚠️ AI 响应异常，请重新尝试或检查后台大模型 API Key 配置。',
+          content: `⚠️ AI 响应失败: ${errMsgText}`,
           createdAt: new Date().toISOString(),
         };
         setMessages((prev) => [...prev, errorMsg]);
       }
     } catch (err) {
       console.error('Error sending chat:', err);
+      const errorMsg: ChatMessage = {
+        id: `temp_err_${Date.now()}`,
+        paperId: paper.id,
+        role: 'assistant',
+        content: `⚠️ 网络异常，无法连接至后端 AI 服务。`,
+        createdAt: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, errorMsg]);
     } finally {
       setLoading(false);
     }
@@ -125,7 +135,7 @@ export default function LLMChatDrawer({ paper, user, isOpen }: Props) {
           <button
             type="button"
             onClick={handleClear}
-            className="flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium text-slate-400 hover:bg-rose-500/10 hover:text-rose-500 dark:hover:bg-rose-500/20"
+            className="flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium text-slate-400 hover:bg-rose-500/10 hover:text-rose-500 dark:hover:bg-rose-500/20 transition cursor-pointer"
             title="清空对话历史"
           >
             <Trash2 className="h-3.5 w-3.5" />
@@ -135,7 +145,7 @@ export default function LLMChatDrawer({ paper, user, isOpen }: Props) {
       </div>
 
       {/* Messages Scroll Area */}
-      <div ref={chatScrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/50 dark:bg-slate-950/30">
+      <div ref={chatScrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/50 dark:bg-slate-950/40">
         {fetching ? (
           <div className="flex h-full items-center justify-center py-12 text-slate-400">
             <Loader2 className="h-5 w-5 animate-spin text-cyan-500" />
@@ -160,7 +170,7 @@ export default function LLMChatDrawer({ paper, user, isOpen }: Props) {
               <div
                 className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
                   msg.role === 'user'
-                    ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900'
+                    ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900'
                     : 'bg-cyan-600 text-white shadow-xs'
                 }`}
               >
@@ -179,7 +189,7 @@ export default function LLMChatDrawer({ paper, user, isOpen }: Props) {
               <div
                 className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-xs shadow-xs transition-all ${
                   msg.role === 'user'
-                    ? 'bg-black text-white dark:bg-slate-100 dark:text-slate-900 rounded-tr-none'
+                    ? 'bg-slate-900 text-white dark:bg-slate-800 dark:text-slate-100 rounded-tr-none'
                     : 'border border-slate-200 bg-white text-slate-800 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 rounded-tl-none'
                 }`}
               >
@@ -210,20 +220,20 @@ export default function LLMChatDrawer({ paper, user, isOpen }: Props) {
 
       {/* Input Box */}
       <div className="border-t border-slate-200 p-3 bg-white dark:border-slate-800 dark:bg-slate-900">
-        <div className="relative flex items-end rounded-xl border border-slate-300 bg-slate-50 p-2 focus-within:border-cyan-500 focus-within:bg-white dark:border-slate-700 dark:bg-slate-950 dark:focus-within:border-cyan-400">
+        <div className="relative flex items-end rounded-xl border border-slate-300 bg-slate-50 p-2 focus-within:bg-white dark:border-slate-700 dark:bg-slate-950 dark:focus-within:bg-slate-900 focus-within:border-cyan-500 dark:focus-within:border-cyan-400">
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="输入您关于本篇论文的问题 (Enter 发送)..."
             rows={2}
-            className="w-full resize-none bg-transparent px-1 py-1 text-xs outline-none dark:text-slate-100 placeholder:text-slate-400"
+            className="w-full resize-none bg-transparent px-1 py-1 text-xs outline-none text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500"
           />
           <button
             type="button"
             onClick={handleSend}
             disabled={!input.trim() || loading}
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-black text-white hover:bg-slate-800 disabled:opacity-30 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white transition"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-30 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white transition cursor-pointer"
           >
             <Send className="h-3.5 w-3.5" />
           </button>

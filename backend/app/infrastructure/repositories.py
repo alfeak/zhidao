@@ -303,9 +303,9 @@ class ConfigRepository:
 
         models_list = [{
             "id": c.get("id", "llm"),
-            "name": c.get("llmModel") or "deepseek-v4-pro",
-            "apiKey": mask_val(c.get("llmApiKey", "")) if masked else c.get("llmApiKey", ""),
-            "baseUrl": c.get("llmBaseUrl") or "https://api.deepseek.com",
+            "name": c.get("llmModel") or model_name,
+            "apiKey": mask_val(c.get("llmApiKey") or api_key) if masked else (c.get("llmApiKey") or api_key),
+            "baseUrl": c.get("llmBaseUrl") or base_url,
             "isPrimary": bool(c.get("isPrimary")),
         } for c in llm_configs]
 
