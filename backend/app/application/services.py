@@ -361,12 +361,12 @@ class PaperService:
     async def recover_translation_jobs(self):
         for id in self.papers.resume_translation_jobs(self.now()):
             self.schedule_translation(id)
-    async def chat(self, id: str, message: str):
+    async def chat(self, id: str, message: str, user_id: str | None = None):
         paper = self.papers.get(id)
         if not paper: raise NotFoundError("Paper not found")
-        cfg = self.config.get(masked=False)
+        cfg = self.config.get_for_user(user_id, masked=False)
         user_msg = {"id": f"msg_{uuid4().hex[:8]}", "paperId": id, "role": "user", "content": message, "createdAt": self.now()}
-        self.collaboration.add_message(user_msg)
+        self.collaboration.add_message(user_msg, user_id=user_id)
         try:
             markdown_content, _ = self.markdown(id)
         except Exception:
@@ -374,12 +374,31 @@ class PaperService:
         system_prompt = (
             f"You are an expert AI research assistant analyzing the paper titled '{paper['title']}'.\n"
             f"Paper URL: {paper['url']}\n"
-            f"Parsed Content:\n{markdown_content[:6000]}\n"
+            f"Parsed Content (Markdown):\n{markdown_content[:15000]}\n"
         )
         reply = await self.llm.generate(cfg, message, system_instruction=system_prompt)
         assistant_msg = {"id": f"msg_{uuid4().hex[:8]}", "paperId": id, "role": "assistant", "content": reply, "createdAt": self.now()}
-        self.collaboration.add_message(assistant_msg)
+        self.collaboration.add_message(assistant_msg, user_id=user_id)
+
+        if user_id:
+            try:
+                all_msgs = self.collaboration.messages(id, user_id=user_id)
+                chat_data = json.dumps(all_msgs, ensure_ascii=False, indent=2).encode("utf-8")
+                archive_path = f"chats/{user_id}.json"
+                R2ObjectStore(user_id=user_id).put(id, archive_path, chat_data)
+            except Exception:
+                pass
+
         return assistant_msg
+
+    def clear_chat(self, id: str, user_id: str | None = None):
+        self.collaboration.clear_messages(id, user_id=user_id)
+        if user_id:
+            try:
+                archive_path = f"chats/{user_id}.json"
+                R2ObjectStore(user_id=user_id).put(id, archive_path, b"[]")
+            except Exception:
+                pass
 
     async def action(self, id: str, payload: dict):
         paper = self.papers.get(id)

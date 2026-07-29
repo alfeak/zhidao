@@ -171,11 +171,20 @@ def get_chat(request: Request, paper_id: str, zhidao_session: str | None = Cooki
     user_id = user["id"] if user else None
     return papers.collaboration.messages(paper_id, user_id=user_id)
 
+@router.post("/papers/{paper_id}/chat")
+async def send_chat(request: Request, paper_id: str, payload: dict = Body(...), zhidao_session: str | None = Cookie(None)):
+    user = get_current_user_from_req(request, zhidao_session)
+    user_id = user["id"] if user else None
+    msg_text = payload.get("message") or payload.get("content")
+    if not msg_text or not str(msg_text).strip():
+        raise ValidationError("Chat message text is required")
+    return await papers.chat(paper_id, str(msg_text).strip(), user_id=user_id)
+
 @router.post("/papers/{paper_id}/chat/clear")
 def clear_chat(request: Request, paper_id: str, zhidao_session: str | None = Cookie(None)):
     user = get_current_user_from_req(request, zhidao_session)
     user_id = user["id"] if user else None
-    papers.collaboration.clear_messages(paper_id, user_id=user_id)
+    papers.clear_chat(paper_id, user_id=user_id)
     return {"success": True}
 
 @router.get("/papers/{paper_id}/remarks")

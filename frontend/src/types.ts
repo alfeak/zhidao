@@ -66,7 +66,7 @@ export interface PaperSearchResult {
 export interface ChatMessage {
   id: string;
   paperId: string;
-  role: 'user' | 'model';
+  role: 'user' | 'model' | 'assistant';
   content: string;
   createdAt: string;
 }

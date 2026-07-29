@@ -7,6 +7,7 @@ import ReaderCore from './components/ReaderCore';
 import LandingPage from './components/LandingPage';
 import UserMenu from './components/UserMenu';
 import SettingsModal from './components/SettingsModal';
+import LLMChatDrawer from './components/LLMChatDrawer';
 import { usePaperWorkspace } from './hooks/usePaperWorkspace';
 import { useAuth } from './hooks/useAuth';
 
@@ -32,6 +33,7 @@ export default function App() {
   const [translationLanguages, setTranslationLanguages] = useState<TranslationLanguage[]>([]);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [isLeftSidebarOpen, setIsLeftSidebarOpen] = useState(true);
+  const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => (
     localStorage.getItem('zhidao-theme') as 'light' | 'dark'
@@ -169,6 +171,22 @@ export default function App() {
         <main className="flex min-h-0 flex-1 flex-col bg-white transition-colors duration-300 dark:bg-slate-950">
           <ReaderCore paper={activePaper} selectedBlock={selectedBlock} onSelectBlock={setSelectedBlock} remarks={remarks} onAddRemark={addRemark} onDeleteRemark={removeRemark} translationLanguages={translationLanguages} onTranslate={translate} loadingAction={loadingAction} />
         </main>
+        {activePaper && (
+          <button
+            onClick={() => setIsRightSidebarOpen((open) => !open)}
+            className="absolute top-1/2 z-40 flex h-12 w-4 -translate-y-1/2 items-center justify-center rounded-l-md border border-r-0 border-gray-200 bg-white text-gray-500 shadow-xs transition-all hover:bg-slate-50 hover:text-black dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+            style={{ right: isRightSidebarOpen ? '380px' : '0px' }}
+            title={isRightSidebarOpen ? '收起 AI 对话面板' : '展开 AI 对话面板'}
+          >
+            {isRightSidebarOpen ? <ChevronRight className="h-3 w-3" /> : <ChevronLeft className="h-3 w-3" />}
+          </button>
+        )}
+        <aside
+          className="flex min-h-0 shrink-0 flex-col overflow-hidden border-l border-gray-200 bg-white transition-all duration-300 dark:border-slate-800 dark:bg-slate-900"
+          style={{ width: activePaper && isRightSidebarOpen ? '380px' : '0px' }}
+        >
+          <LLMChatDrawer paper={activePaper} user={user} isOpen={isRightSidebarOpen} />
+        </aside>
       </div>
     </div>
   );
