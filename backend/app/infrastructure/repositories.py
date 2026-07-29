@@ -12,8 +12,19 @@ class PaperRepository:
     def get(self, id):
         with SessionLocal() as s:
             x=s.get(DocumentRecord,id); return document_dict(x) if x else None
+    def get_by_url(self, source_url):
+        with SessionLocal() as s:
+            x=s.scalar(select(DocumentRecord).where(DocumentRecord.source_url==source_url))
+            return document_dict(x) if x else None
     def create(self, p):
-        with SessionLocal.begin() as s: s.add(DocumentRecord(id=p["id"],title=p["title"],source_url=p["url"],imported_at=p["importedAt"]))
+        with SessionLocal.begin() as s:
+            x=s.get(DocumentRecord, p["id"])
+            if not x:
+                s.add(DocumentRecord(id=p["id"],title=p["title"],source_url=p["url"],imported_at=p["importedAt"]))
+            else:
+                x.title=p["title"]
+                x.source_url=p["url"]
+                x.imported_at=p["importedAt"]
         return self.get(p["id"])
     def set_status(self,id,status,error=None):
         with SessionLocal.begin() as s:
@@ -33,6 +44,7 @@ class PaperRepository:
             x=s.get(DocumentRecord,id)
             if not x:return False, None
             prefix=x.object_prefix; s.delete(x); return True, prefix
+
 
 class ConfigRepository:
     def get(self,masked=True): return {"models":[]}

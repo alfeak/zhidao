@@ -60,7 +60,8 @@ def list_papers(): return papers.list_papers()
 @router.post("/papers/import")
 async def import_paper(payload: dict, background_tasks: BackgroundTasks):
     paper = await papers.import_paper(payload.get("url"), payload.get("title"))
-    background_tasks.add_task(papers.decode, paper["id"])
+    if not paper.get("isDecoded"):
+        background_tasks.add_task(papers.decode, paper["id"])
     return {"success": True, "paper": paper}
 
 @router.delete("/papers/{paper_id}")

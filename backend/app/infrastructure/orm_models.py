@@ -22,7 +22,7 @@ class DocumentRecord(Base):
     __tablename__ = "documents"
     id: Mapped[str] = mapped_column(String, primary_key=True)
     title: Mapped[str] = mapped_column(Text, nullable=False)
-    source_url: Mapped[str] = mapped_column(Text, nullable=False)
+    source_url: Mapped[str] = mapped_column(Text, nullable=False, index=True)
     decode_status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
     decode_error: Mapped[str | None] = mapped_column(Text)
     object_prefix: Mapped[str | None] = mapped_column(String, unique=True)

@@ -49,8 +49,22 @@ class R2ObjectStore:
         result = self.client.get_object(Bucket=self.bucket, Key=key)
         return result["Body"], result.get("ContentType", "application/octet-stream")
 
+    def list_cached_artifacts(self, document_id: str) -> list[StoredObject]:
+        prefix_key = self.key_for(document_id, "").rstrip("/") + "/"
+        paginator = self.client.get_paginator("list_objects_v2")
+        stored = []
+        for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix_key):
+            for item in page.get("Contents", []):
+                key = item["Key"]
+                archive_path = key[len(prefix_key):]
+                if not archive_path: continue
+                content_type = mimetypes.guess_type(archive_path)[0] or "application/octet-stream"
+                etag = item.get("ETag", "").strip('"')
+                stored.append(StoredObject(archive_path, key, content_type, item.get("Size", 0), etag))
+        return stored
+
     def delete_prefix(self, prefix: str) -> None:
         paginator = self.client.get_paginator("list_objects_v2")
         for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
             entries = [{"Key": item["Key"]} for item in page.get("Contents", [])]
-            if entries: self.client.delete_objects(Bucket=self.bucket, Delete={"Objects": entries, "Quiet": True})
+            if entries: self.client.delete_objects(Bucket=self.bucket, Delete={"Objects": entries, "Quiet": True})
