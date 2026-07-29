@@ -94,6 +94,18 @@ docker compose up --build
 
 前端默认运行在 `http://localhost:5173`，后端运行在 `http://localhost:8000`。
 
+## Docker Hub 自动发布
+
+仓库推送到 `main`（包括合并 PR）时，GitHub Actions 会构建并推送两个镜像：
+
+- `<DOCKERHUB_USERNAME>/zhidao-backend:latest`
+- `<DOCKERHUB_USERNAME>/zhidao-frontend:latest`
+
+每次构建也会推送不可变的提交标签，例如 `:sha-<commit-sha>`。在 GitHub 仓库的 **Settings → Secrets and variables → Actions** 中配置：
+
+- `DOCKERHUB_USERNAME`：Docker Hub 用户名或组织名
+- `DOCKERHUB_TOKEN`：具备镜像推送权限的 Docker Hub access token
+
 ## 主要接口
 
 | 方法 | 路径 | 说明 |
