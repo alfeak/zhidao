@@ -47,6 +47,11 @@ def get_parsed_pdf(paper_id: str):
     body, media_type = R2ObjectStore().stream(artifact.object_key)
     return StreamingResponse(body.iter_chunks(), media_type=media_type)
 
+@router.get("/papers/{paper_id}/layout-boxes")
+def get_layout_boxes(paper_id: str):
+    papers.paper(paper_id)
+    return {"boxes": papers.layout_boxes(paper_id)}
+
 @router.get("/papers/{paper_id}/assets/{asset_path:path}")
 def get_paper_asset(paper_id: str, asset_path: str):
     artifact = papers.artifact(paper_id, asset_path)

@@ -1,5 +1,6 @@
 import hashlib
 import asyncio
+import json
 from datetime import datetime, timezone
 from uuid import uuid4
 import re
@@ -116,6 +117,55 @@ class PaperService:
         content, _ = self.markdown(id)
         blocks = [part.strip() for part in re.split(r"(?=^#{1,6}\s)", content, flags=re.MULTILINE) if part.strip()]
         return len(blocks) or 1
+
+    def layout_boxes(self, id: str) -> list[dict]:
+        """Return MinerU layout boxes in their original page coordinate space."""
+        from ..infrastructure.database import SessionLocal
+        from ..infrastructure.orm_models import DocumentArtifactRecord
+        from sqlalchemy import select
+
+        with SessionLocal() as session:
+            artifacts = list(session.scalars(select(DocumentArtifactRecord).where(
+                DocumentArtifactRecord.document_id == id,
+                DocumentArtifactRecord.kind == "json",
+            )))
+        artifact = next((item for item in artifacts if item.archive_path == "layout.json"), None)
+        if not artifact:
+            return []
+        try:
+            payload = json.loads(R2ObjectStore().read(artifact.object_key))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return []
+
+        boxes: list[dict] = []
+        for page in payload.get("pdf_info", []) if isinstance(payload, dict) else []:
+            page_index, page_size = page.get("page_idx"), page.get("page_size")
+            if not isinstance(page_index, int) or not isinstance(page_size, list) or len(page_size) != 2:
+                continue
+            page_width, page_height = page_size
+            if not all(isinstance(value, (int, float)) and value > 0 for value in (page_width, page_height)):
+                continue
+            for index, block in enumerate(page.get("preproc_blocks", [])):
+                bbox = block.get("bbox") if isinstance(block, dict) else None
+                if not isinstance(bbox, list) or len(bbox) != 4 or not all(isinstance(value, (int, float)) for value in bbox):
+                    continue
+                x0, y0, x1, y1 = bbox
+                x0, x1 = max(0, min(page_width, x0)), max(0, min(page_width, x1))
+                y0, y1 = max(0, min(page_height, y0)), max(0, min(page_height, y1))
+                if x1 <= x0 or y1 <= y0:
+                    continue
+                boxes.append({
+                    "id": f"{page_index}:{block.get('index', index)}",
+                    "pageIndex": page_index,
+                    "pageWidth": page_width,
+                    "pageHeight": page_height,
+                    "x0": x0,
+                    "y0": y0,
+                    "x1": x1,
+                    "y1": y1,
+                    "type": str(block.get("type", "content")),
+                })
+        return boxes
 
     @staticmethod
     def translation_language(target_language: str) -> dict:

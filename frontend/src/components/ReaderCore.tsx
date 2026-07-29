@@ -7,7 +7,8 @@ import MarkdownRenderer from './MarkdownRenderer';
 import ReaderToolbar, { ReaderMode } from './reader/ReaderToolbar';
 import TranslationControls from './reader/TranslationControls';
 import ConfirmPopover from './ConfirmPopover';
-import { HighlightRemark, MarkdownBlock, Paper, TranslationLanguage } from '../types';
+import PdfBboxOverlay from './PdfBboxOverlay';
+import { HighlightRemark, MarkdownBlock, Paper, PdfBoundingBox, TranslationLanguage } from '../types';
 
 pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 
@@ -90,6 +91,7 @@ export default function ReaderCore({ paper, selectedBlock, onSelectBlock, remark
   const [error, setError] = useState<string | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [pages, setPages] = useState<number | null>(null);
+  const [pdfBoxes, setPdfBoxes] = useState<PdfBoundingBox[]>([]);
 
   const translationCodes = paper?.translations?.map((item) => item.targetLanguage).join('|') || '';
   const hasTranslation = !!language && paper?.translations?.some((item) => item.targetLanguage === language);
@@ -106,6 +108,22 @@ export default function ReaderCore({ paper, selectedBlock, onSelectBlock, remark
       if (!controller.signal.aborted) setPdfUrl(url);
     }).catch(() => !controller.signal.aborted && setPdfUrl(null));
     return () => { controller.abort(); if (url) URL.revokeObjectURL(url); };
+  }, [paper?.id, paper?.isDecoded]);
+
+  useEffect(() => {
+    if (!paper?.isDecoded) {
+      setPdfBoxes([]);
+      return;
+    }
+    const controller = new AbortController();
+    fetch(`/api/papers/${paper.id}/layout-boxes`, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('Layout data unavailable');
+        return response.json() as Promise<{ boxes: PdfBoundingBox[] }>;
+      })
+      .then(({ boxes }) => { if (!controller.signal.aborted) setPdfBoxes(boxes); })
+      .catch(() => { if (!controller.signal.aborted) setPdfBoxes([]); });
+    return () => controller.abort();
   }, [paper?.id, paper?.isDecoded]);
 
   useEffect(() => {
@@ -133,12 +151,17 @@ export default function ReaderCore({ paper, selectedBlock, onSelectBlock, remark
     for (const remark of remarks) result.set(remark.blockIndex, [...(result.get(remark.blockIndex) || []), remark]);
     return result;
   }, [remarks]);
+  const pdfBoxesByPage = useMemo(() => {
+    const result = new Map<number, PdfBoundingBox[]>();
+    for (const box of pdfBoxes) result.set(box.pageIndex, [...(result.get(box.pageIndex) || []), box]);
+    return result;
+  }, [pdfBoxes]);
 
   if (!paper) return <div className="flex-1 flex items-center justify-center text-slate-400"><FileText className="w-12 h-12" /></div>;
   return <div className="flex-1 flex flex-col min-h-0 bg-gray-50/50 dark:bg-slate-950/20">
     <ReaderToolbar paper={paper} mode={mode} onModeChange={setMode} onOpenTranslate={openTranslate} />
     <div className="flex-1 min-h-0 overflow-y-auto px-6 py-8">
-      {mode === 'pdf' ? <div className="min-h-full flex justify-center bg-slate-100 dark:bg-slate-950 py-6">{pdfUrl ? <Document file={pdfUrl} onLoadSuccess={({ numPages }) => setPages(numPages)}>{pages && Array.from({ length: pages }, (_, index) => <Page key={index} pageNumber={index + 1} width={900} className="max-w-[calc(100vw-3rem)] shadow-xl mb-4" />)}</Document> : <span className="text-sm text-slate-500">Loading PDF…</span>}</div> :
+      {mode === 'pdf' ? <div className="min-h-full flex justify-center bg-slate-100 dark:bg-slate-950 py-6">{pdfUrl ? <Document file={pdfUrl} onLoadSuccess={({ numPages }) => setPages(numPages)}>{pages && Array.from({ length: pages }, (_, index) => <div key={index} className="relative mb-4 w-fit max-w-[calc(100vw-3rem)] shadow-xl"><Page pageNumber={index + 1} width={900} className="max-w-[calc(100vw-3rem)]" /><PdfBboxOverlay boxes={pdfBoxesByPage.get(index) || []} /></div>)}</Document> : <span className="text-sm text-slate-500">Loading PDF…</span>}</div> :
         <div className="max-w-3xl mx-auto space-y-6">
           {mode === 'translate' && <TranslationControls paper={paper} language={language} languages={translationLanguages} loading={loadingAction === 'translate_full'} onLanguageChange={setLanguage} onTranslate={onTranslate} />}
           {mode === 'translate' && !hasTranslation ? <div className="py-16 text-center text-sm text-gray-500">Choose a language and start a translation. The completed document will appear here automatically.</div> :
