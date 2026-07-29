@@ -112,22 +112,23 @@ export default function ReaderCore({ paper, selectedBlock, onSelectBlock, remark
   const [pdfChineseBlocks, setPdfChineseBlocks] = useState<MarkdownBlock[]>([]);
   const [pdfSelectedBox, setPdfSelectedBox] = useState<PdfBoundingBox | null>(null);
   const [pdfScale, setPdfScale] = useState(1);
-  const [isPdfPanning, setIsPdfPanning] = useState(false);
+  const [mdScale, setMdScale] = useState(1);
+  const [isPanning, setIsPanning] = useState(false);
   const pdfPopoverRef = useRef<HTMLElement | null>(null);
   const readerScrollRef = useRef<HTMLDivElement | null>(null);
   const blockElementsRef = useRef(new Map<number, HTMLDivElement>());
   const pageElementsRef = useRef(new Map<number, HTMLDivElement>());
   const pendingJumpRef = useRef<{ mode: ReaderMode; blockIndex: number; pageIndex?: number } | null>(null);
-  const pdfPanRef = useRef<{ pointerId: number; clientX: number; clientY: number; scrollLeft: number; scrollTop: number; moved: boolean } | null>(null);
+  const panRef = useRef<{ pointerId: number; clientX: number; clientY: number; scrollLeft: number; scrollTop: number; moved: boolean } | null>(null);
   const pdfZoomAnchorRef = useRef<{ pageIndex: number; localX: number; localY: number; clientX: number; clientY: number } | null>(null);
-  const suppressPdfClickRef = useRef(false);
+  const suppressClickRef = useRef(false);
   const markdownCacheRef = useRef(new Map<string, MarkdownBlock[]>());
   const [jumpMenu, setJumpMenu] = useState<JumpMenuState | null>(null);
 
   const translationCodes = paper?.translations?.map((item) => item.targetLanguage).join('|') || '';
   const hasTranslation = !!language && paper?.translations?.some((item) => item.targetLanguage === language);
 
-  useEffect(() => { setMode('pdf'); setLanguage(null); setBlocks([]); setLoadedLanguage(null); setPdfScale(1); pendingJumpRef.current = null; setJumpMenu(null); }, [paper?.id]);
+  useEffect(() => { setMode('pdf'); setLanguage(null); setBlocks([]); setLoadedLanguage(null); setPdfScale(1); setMdScale(1); pendingJumpRef.current = null; setJumpMenu(null); }, [paper?.id]);
   useEffect(() => {
     if (mode === 'translate' && !language) {
       setLanguage(translationLanguages.some((item) => item.code === 'zh-CN') ? 'zh-CN' : translationLanguages[0]?.code || null);
@@ -312,15 +313,17 @@ export default function ReaderCore({ paper, selectedBlock, onSelectBlock, remark
     const rect = element.getBoundingClientRect();
     return clientY >= rect.top && clientY <= rect.bottom;
   });
-  const startPdfPan = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (mode !== 'pdf' || event.button !== 0 || pdfPopoverRef.current?.contains(event.target as Node)) return;
+  const startPan = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || pdfPopoverRef.current?.contains(event.target as Node)) return;
+    const target = event.target as HTMLElement;
+    if (target.closest('button, input, textarea, a, select, [role="button"]')) return;
     const container = readerScrollRef.current;
     if (!container) return;
-    pdfPanRef.current = { pointerId: event.pointerId, clientX: event.clientX, clientY: event.clientY, scrollLeft: container.scrollLeft, scrollTop: container.scrollTop, moved: false };
-    setIsPdfPanning(true);
+    panRef.current = { pointerId: event.pointerId, clientX: event.clientX, clientY: event.clientY, scrollLeft: container.scrollLeft, scrollTop: container.scrollTop, moved: false };
+    setIsPanning(true);
   };
-  const movePdfPan = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const pan = pdfPanRef.current;
+  const movePan = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const pan = panRef.current;
     const container = readerScrollRef.current;
     if (!pan || !container || pan.pointerId !== event.pointerId) return;
     const dx = event.clientX - pan.clientX;
@@ -334,21 +337,19 @@ export default function ReaderCore({ paper, selectedBlock, onSelectBlock, remark
       container.scrollTop = pan.scrollTop - dy;
     }
   };
-  const finishPdfPan = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const pan = pdfPanRef.current;
+  const finishPan = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const pan = panRef.current;
     if (!pan || pan.pointerId !== event.pointerId) return;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     if (pan.moved) {
-      suppressPdfClickRef.current = true;
-      window.setTimeout(() => { suppressPdfClickRef.current = false; }, 0);
+      suppressClickRef.current = true;
+      window.setTimeout(() => { suppressClickRef.current = false; }, 0);
     }
-    pdfPanRef.current = null;
-    setIsPdfPanning(false);
+    panRef.current = null;
+    setIsPanning(false);
   };
   const zoomPdfAtPointer = (event: WheelEvent) => {
     if (!event.ctrlKey) return;
-    // This is deliberately a native non-passive listener: React's wheel
-    // handler may be passive in some browser/runtime combinations.
     event.preventDefault();
     const container = readerScrollRef.current;
     const pageEntry = pageAtPointer(event.clientY);
@@ -361,19 +362,24 @@ export default function ReaderCore({ paper, selectedBlock, onSelectBlock, remark
     setPdfScale(nextScale);
   };
   useEffect(() => {
-    if (mode !== 'pdf') return;
     const captureCtrlWheel = (event: WheelEvent) => {
       const container = readerScrollRef.current;
       if (!event.ctrlKey || !container || !container.contains(event.target as Node)) return;
-      // Capture at window so Chrome never receives an uncancelled Ctrl+wheel
-      // event for this reader and therefore cannot zoom the browser page.
       event.preventDefault();
       event.stopPropagation();
-      zoomPdfAtPointer(event);
+      if (mode === 'pdf') {
+        zoomPdfAtPointer(event);
+      } else {
+        const nextScale = Math.max(0.5, Math.min(3, mdScale * Math.exp(-event.deltaY * 0.0015)));
+        if (Math.abs(nextScale - mdScale) >= 0.001) {
+          setMdScale(nextScale);
+        }
+      }
     };
     window.addEventListener('wheel', captureCtrlWheel, { capture: true, passive: false });
     return () => window.removeEventListener('wheel', captureCtrlWheel, true);
-  }, [mode, pdfScale]);
+  }, [mode, pdfScale, mdScale]);
+
   useEffect(() => {
     const anchor = pdfZoomAnchorRef.current;
     if (!anchor) return;
@@ -383,8 +389,6 @@ export default function ReaderCore({ paper, selectedBlock, onSelectBlock, remark
         const page = pageElementsRef.current.get(anchor.pageIndex);
         if (!container || !page) return;
         const rect = page.getBoundingClientRect();
-        // Keep zoom anchoring immediate; smooth motion here would make the
-        // cursor drift away from the point it is magnifying.
         container.scrollLeft += rect.left + anchor.localX * pdfScale - anchor.clientX;
         container.scrollTop += rect.top + anchor.localY * pdfScale - anchor.clientY;
         pdfZoomAnchorRef.current = null;
@@ -394,15 +398,37 @@ export default function ReaderCore({ paper, selectedBlock, onSelectBlock, remark
   }, [pdfScale]);
 
   if (!paper) return <div className="flex-1 flex items-center justify-center text-slate-400"><FileText className="w-12 h-12" /></div>;
+  const currentScale = mode === 'pdf' ? pdfScale : mdScale;
+  const handleZoomIn = () => (mode === 'pdf' ? setPdfScale((s) => Math.min(3, s + 0.15)) : setMdScale((s) => Math.min(3, s + 0.15)));
+  const handleZoomOut = () => (mode === 'pdf' ? setPdfScale((s) => Math.max(0.5, s - 0.15)) : setMdScale((s) => Math.max(0.5, s - 0.15)));
+  const handleResetZoom = () => (mode === 'pdf' ? setPdfScale(1.0) : setMdScale(1.0));
+
   return <div className="flex-1 flex flex-col min-h-0 bg-gray-50/50 dark:bg-slate-950/20">
-    <ReaderToolbar paper={paper} mode={mode} onModeChange={changeMode} onOpenTranslate={openTranslate} />
-    <div ref={readerScrollRef} onPointerDown={startPdfPan} onPointerMove={movePdfPan} onPointerUp={finishPdfPan} onPointerCancel={finishPdfPan} onClickCapture={(event) => { if (suppressPdfClickRef.current) { event.preventDefault(); event.stopPropagation(); } }} className={`flex-1 min-h-0 scroll-smooth px-6 py-8 ${mode === 'pdf' ? `overflow-auto select-none ${isPdfPanning ? 'cursor-grabbing' : 'cursor-grab'}` : 'overflow-y-auto'}`}>
+    <ReaderToolbar
+      paper={paper}
+      mode={mode}
+      onModeChange={changeMode}
+      onOpenTranslate={openTranslate}
+      scale={currentScale}
+      onZoomIn={handleZoomIn}
+      onZoomOut={handleZoomOut}
+      onResetZoom={handleResetZoom}
+    />
+    <div
+      ref={readerScrollRef}
+      onPointerDown={startPan}
+      onPointerMove={movePan}
+      onPointerUp={finishPan}
+      onPointerCancel={finishPan}
+      onClickCapture={(event) => { if (suppressClickRef.current) { event.preventDefault(); event.stopPropagation(); } }}
+      className={`flex-1 min-h-0 scroll-smooth px-6 py-8 overflow-auto select-none ${isPanning ? 'cursor-grabbing' : 'cursor-grab'}`}
+    >
       {mode === 'pdf' ? <div className="min-h-full min-w-full w-max flex justify-center bg-slate-100 dark:bg-slate-950 py-6">{pdfUrl ? <Document file={pdfUrl} onLoadSuccess={({ numPages }) => setPages(numPages)}>{pages && Array.from({ length: pages }, (_, index) => {
         const selectedBlock = pdfSelectedBox?.pageIndex === index ? pdfSourceBlocksByIndex.get(pdfSelectedBox.blockIndex) : undefined;
         const chineseBlock = selectedBlock ? pdfChineseBlocksByIndex.get(selectedBlock.index) : undefined;
         return <div key={index} ref={(element) => { if (element) pageElementsRef.current.set(index, element); else pageElementsRef.current.delete(index); }} className="relative mb-4 w-fit shadow-xl"><Page pageNumber={index + 1} width={Math.round(900 * pdfScale)} /><PdfBboxOverlay boxes={pdfBoxesByPage.get(index) || []} remarksByBlock={remarksByBlock} onSelectBox={selectPdfBox} onContextMenu={(box, x, y) => openJumpMenu(box.blockIndex, box.pageIndex, x, y)} />{selectedBlock && <PdfBlockPopover block={selectedBlock} box={pdfSelectedBox!} paperId={paper.id} chineseContent={chineseBlock?.content} popoverRef={pdfPopoverRef} remarks={remarksByBlock.get(selectedBlock.index) || []} onClose={() => setPdfSelectedBox(null)} onAddRemark={onAddRemark} onDeleteRemark={onDeleteRemark} />}</div>;
       })}</Document> : <span className="text-sm text-slate-500">Loading PDF…</span>}</div> :
-        <div className="mx-auto max-w-3xl space-y-1">
+        <div className="mx-auto max-w-3xl space-y-1 origin-top transition-transform duration-75" style={{ zoom: mdScale }}>
           {mode === 'translate' && <TranslationControls paper={paper} language={language} languages={translationLanguages} loading={loadingAction === 'translate_full'} onLanguageChange={setLanguage} onTranslate={onTranslate} />}
           {mode === 'translate' && !hasTranslation ? <div className="py-16 text-center text-sm text-gray-500">Choose a language and start a translation. The completed document will appear here automatically.</div> :
             !visibleBlocks || loading ? <div className="py-12 text-center text-sm text-gray-500">Loading…</div> : error ? <div className="py-12 text-center text-sm text-rose-600">{error}</div> : blocks.map((block) => <div key={block.id} ref={(element) => { if (element) blockElementsRef.current.set(block.index, element); else blockElementsRef.current.delete(block.index); }}><MarkdownBlockCard block={block} paperId={paper.id} remarks={remarksByBlock.get(block.index) || []} selected={selectedBlock?.id === block.id} onSelect={selectMarkdownBlock} onAddRemark={onAddRemark} onDeleteRemark={onDeleteRemark} onContextMenu={(item, x, y) => openJumpMenu(item.index, item.pageIndex, x, y)} /></div>)}
