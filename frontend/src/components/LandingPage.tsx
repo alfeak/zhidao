@@ -143,8 +143,44 @@ export default function LandingPage({ googleClientId, onGoogleLogin }: Props) {
     };
   }, []);
 
+  const onGoogleLoginRef = useRef(onGoogleLogin);
+  useEffect(() => {
+    onGoogleLoginRef.current = onGoogleLogin;
+  }, [onGoogleLogin]);
+
   useEffect(() => {
     if (!googleClientId) return;
+
+    function initGoogleSignIn() {
+      if (!window.google?.accounts?.id) return;
+      window.google.accounts.id.initialize({
+        client_id: googleClientId,
+        callback: async (response) => {
+          if (response.credential) {
+            setLoading(true);
+            setError(null);
+            try {
+              await onGoogleLoginRef.current(response.credential);
+            } catch (err: any) {
+              setError(err.message || '登录失败，请稍后重试');
+              setLoading(false);
+            }
+          }
+        },
+      });
+
+      const btnContainer = document.getElementById('googleSignInDiv');
+      if (btnContainer && !btnContainer.hasChildNodes()) {
+        window.google.accounts.id.renderButton(btnContainer, {
+          theme: 'filled_black',
+          size: 'large',
+          shape: 'pill',
+          width: 320,
+          text: 'signin_with',
+          locale: 'zh_CN',
+        });
+      }
+    }
 
     const scriptId = 'google-jssdk';
     if (!document.getElementById(scriptId)) {
@@ -158,38 +194,7 @@ export default function LandingPage({ googleClientId, onGoogleLogin }: Props) {
     } else {
       initGoogleSignIn();
     }
-
-    function initGoogleSignIn() {
-      if (!window.google?.accounts?.id) return;
-      window.google.accounts.id.initialize({
-        client_id: googleClientId,
-        callback: async (response) => {
-          if (response.credential) {
-            setLoading(true);
-            setError(null);
-            try {
-              await onGoogleLogin(response.credential);
-            } catch (err: any) {
-              setError(err.message || '登录失败，请稍后重试');
-              setLoading(false);
-            }
-          }
-        },
-      });
-
-      const btnContainer = document.getElementById('googleSignInDiv');
-      if (btnContainer) {
-        window.google.accounts.id.renderButton(btnContainer, {
-          theme: 'filled_black',
-          size: 'large',
-          shape: 'pill',
-          width: 320,
-          text: 'signin_with',
-          locale: 'zh_CN',
-        });
-      }
-    }
-  }, [googleClientId, onGoogleLogin]);
+  }, [googleClientId]);
 
   const handleDemoLogin = async () => {
     setLoading(true);
