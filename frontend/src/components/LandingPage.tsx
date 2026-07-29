@@ -41,21 +41,19 @@ export default function LandingPage({ googleClientId, onGoogleLogin }: Props) {
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
 
-    // Generate points on a larger ellipsoid surface
-    const pointCount = 550;
+    // Generate points on a large spherical surface (expanding to half screen size)
+    const pointCount = 700;
     const points: Array<{ x: number; y: number; z: number; baseAlpha: number }> = [];
-    const rx = 380;
-    const ry = 220;
-    const rz = 280;
+    const sphereRadius = Math.max(380, Math.min(window.innerWidth, window.innerHeight) * 0.45);
 
     for (let i = 0; i < pointCount; i++) {
       const phi = Math.acos(1 - 2 * Math.random()) - Math.PI / 2;
       const theta = Math.random() * Math.PI * 2;
       const noise = 0.9 + Math.random() * 0.2;
       points.push({
-        x: rx * Math.cos(phi) * Math.cos(theta) * noise,
-        y: ry * Math.cos(phi) * Math.sin(theta) * noise,
-        z: rz * Math.sin(phi) * noise,
+        x: sphereRadius * Math.cos(phi) * Math.cos(theta) * noise,
+        y: sphereRadius * Math.cos(phi) * Math.sin(theta) * noise,
+        z: sphereRadius * Math.sin(phi) * noise,
         baseAlpha: 0.3 + Math.random() * 0.6,
       });
     }
@@ -67,8 +65,7 @@ export default function LandingPage({ googleClientId, onGoogleLogin }: Props) {
     const render = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       const centerX = canvas.width / 2;
-      // Shift center upward so the bottom of the ellipsoid aligns near the "知道" title
-      const centerY = canvas.height * 0.24;
+      const centerY = canvas.height * 0.28;
 
       angleX += 0.0006;
       angleY += 0.0012;
@@ -98,7 +95,7 @@ export default function LandingPage({ googleClientId, onGoogleLogin }: Props) {
         let y3 = x2 * sinZ + y2 * cosZ;
         let z3 = z2;
 
-        const distance = 600;
+        const distance = 700;
         const perspectiveScale = distance / (distance + z3);
         const screenX = centerX + x3 * perspectiveScale;
         const screenY = centerY + y3 * perspectiveScale;
@@ -115,8 +112,8 @@ export default function LandingPage({ googleClientId, onGoogleLogin }: Props) {
       projectedPoints.sort((a, b) => a.z - b.z);
 
       for (const p of projectedPoints) {
-        const alpha = Math.max(0.1, Math.min(1, ((p.z + rz) / (rz * 2)) * p.baseAlpha));
-        const radius = Math.max(0.8, 2.0 * p.scale);
+        const alpha = Math.max(0.1, Math.min(1, ((p.z + sphereRadius) / (sphereRadius * 2)) * p.baseAlpha));
+        const radius = Math.max(0.8, 2.2 * p.scale);
 
         ctx.beginPath();
         ctx.arc(p.screenX, p.screenY, radius, 0, Math.PI * 2);
