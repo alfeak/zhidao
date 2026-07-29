@@ -11,7 +11,10 @@ import PdfBboxOverlay from './PdfBboxOverlay';
 import PdfBlockPopover from './PdfBlockPopover';
 import { HighlightRemark, MarkdownBlock, Paper, PdfBoundingBox, TranslationLanguage } from '../types';
 
-pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
+pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.mjs',
+  import.meta.url,
+).toString();
 
 interface Props {
   paper: Paper | null; selectedBlock: MarkdownBlock | null; onSelectBlock: (block: MarkdownBlock) => void;
