@@ -110,9 +110,11 @@ class PaperRepository:
             prefix=x.object_prefix; s.delete(x); return True, prefix
 
 
+import json
+
 class UserSettingsRepository:
     @staticmethod
-    def get_user_settings(user_id: str | None) -> dict:
+    def get_raw_user_settings(user_id: str | None) -> dict:
         if not user_id:
             return {}
         from .orm_models import UserSettingsRecord
@@ -120,19 +122,74 @@ class UserSettingsRepository:
             rec = s.get(UserSettingsRecord, user_id)
             if not rec:
                 return {}
+            
+            stored = {}
+            if rec.configs_json:
+                try:
+                    stored = json.loads(rec.configs_json)
+                except Exception:
+                    stored = {}
+
+            mineru_configs = stored.get("mineruConfigs")
+            if not mineru_configs:
+                mineru_configs = [{
+                    "id": "mineru_1",
+                    "name": "默认 MinerU 配置",
+                    "mineruToken": rec.mineru_token or "",
+                    "mineruBaseUrl": rec.mineru_base_url or "https://mineru.net/api/v4",
+                    "isPrimary": True,
+                }]
+
+            llm_configs = stored.get("llmConfigs")
+            if not llm_configs:
+                llm_configs = [{
+                    "id": "llm_1",
+                    "name": "默认大模型",
+                    "llmModel": rec.llm_model or "deepseek-v4-pro",
+                    "llmApiKey": rec.llm_api_key or "",
+                    "llmBaseUrl": rec.llm_base_url or "https://api.deepseek.com",
+                    "isPrimary": True,
+                }]
+
+            r2_configs = stored.get("r2Configs")
+            if not r2_configs:
+                r2_configs = [{
+                    "id": "r2_1",
+                    "name": "默认 R2 存储",
+                    "r2AccountId": rec.r2_account_id or "",
+                    "r2Bucket": rec.r2_bucket or "",
+                    "r2AccessKeyId": rec.r2_access_key_id or "",
+                    "r2SecretAccessKey": rec.r2_secret_access_key or "",
+                    "r2EndpointUrl": rec.r2_endpoint_url or "",
+                    "r2Prefix": rec.r2_prefix or "mineru",
+                    "isPrimary": True,
+                }]
+
+            # Determine primary item for each list
+            primary_mineru = next((c for c in mineru_configs if c.get("isPrimary")), mineru_configs[0])
+            primary_llm = next((c for c in llm_configs if c.get("isPrimary")), llm_configs[0])
+            primary_r2 = next((c for c in r2_configs if c.get("isPrimary")), r2_configs[0])
+
             return {
-                "mineruToken": rec.mineru_token or "",
-                "mineruBaseUrl": rec.mineru_base_url or "",
-                "llmModel": rec.llm_model or "",
-                "llmApiKey": rec.llm_api_key or "",
-                "llmBaseUrl": rec.llm_base_url or "",
-                "r2AccountId": rec.r2_account_id or "",
-                "r2Bucket": rec.r2_bucket or "",
-                "r2AccessKeyId": rec.r2_access_key_id or "",
-                "r2SecretAccessKey": rec.r2_secret_access_key or "",
-                "r2EndpointUrl": rec.r2_endpoint_url or "",
-                "r2Prefix": rec.r2_prefix or "",
+                "mineruConfigs": mineru_configs,
+                "llmConfigs": llm_configs,
+                "r2Configs": r2_configs,
+                "mineruToken": primary_mineru.get("mineruToken") or rec.mineru_token or "",
+                "mineruBaseUrl": primary_mineru.get("mineruBaseUrl") or rec.mineru_base_url or "",
+                "llmModel": primary_llm.get("llmModel") or rec.llm_model or "",
+                "llmApiKey": primary_llm.get("llmApiKey") or rec.llm_api_key or "",
+                "llmBaseUrl": primary_llm.get("llmBaseUrl") or rec.llm_base_url or "",
+                "r2AccountId": primary_r2.get("r2AccountId") or rec.r2_account_id or "",
+                "r2Bucket": primary_r2.get("r2Bucket") or rec.r2_bucket or "",
+                "r2AccessKeyId": primary_r2.get("r2AccessKeyId") or rec.r2_access_key_id or "",
+                "r2SecretAccessKey": primary_r2.get("r2SecretAccessKey") or rec.r2_secret_access_key or "",
+                "r2EndpointUrl": primary_r2.get("r2EndpointUrl") or rec.r2_endpoint_url or "",
+                "r2Prefix": primary_r2.get("r2Prefix") or rec.r2_prefix or "",
             }
+
+    @staticmethod
+    def get_user_settings(user_id: str | None) -> dict:
+        return UserSettingsRepository.get_raw_user_settings(user_id)
 
     @staticmethod
     def update_user_settings(user_id: str, payload: dict) -> dict:
@@ -141,35 +198,68 @@ class UserSettingsRepository:
         from .orm_models import UserSettingsRecord
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc).isoformat()
+        
+        existing_raw = UserSettingsRepository.get_raw_user_settings(user_id)
+
         with SessionLocal.begin() as s:
             rec = s.get(UserSettingsRecord, user_id)
             if not rec:
                 rec = UserSettingsRecord(user_id=user_id, updated_at=now)
                 s.add(rec)
-            
-            if "mineruToken" in payload and not str(payload["mineruToken"]).startswith("•••"):
-                rec.mineru_token = payload["mineruToken"]
-            if "mineruBaseUrl" in payload:
-                rec.mineru_base_url = payload["mineruBaseUrl"]
-            if "llmModel" in payload:
-                rec.llm_model = payload["llmModel"]
-            if "llmApiKey" in payload and not str(payload["llmApiKey"]).startswith("•••"):
-                rec.llm_api_key = payload["llmApiKey"]
-            if "llmBaseUrl" in payload:
-                rec.llm_base_url = payload["llmBaseUrl"]
-            if "r2AccountId" in payload:
-                rec.r2_account_id = payload["r2AccountId"]
-            if "r2Bucket" in payload:
-                rec.r2_bucket = payload["r2Bucket"]
-            if "r2AccessKeyId" in payload:
-                rec.r2_access_key_id = payload["r2AccessKeyId"]
-            if "r2SecretAccessKey" in payload and not str(payload["r2SecretAccessKey"]).startswith("•••"):
-                rec.r2_secret_access_key = payload["r2SecretAccessKey"]
-            if "r2EndpointUrl" in payload:
-                rec.r2_endpoint_url = payload["r2EndpointUrl"]
-            if "r2Prefix" in payload:
-                rec.r2_prefix = payload["r2Prefix"]
+
+            mineru_configs = payload.get("mineruConfigs") or existing_raw.get("mineruConfigs") or []
+            llm_configs = payload.get("llmConfigs") or existing_raw.get("llmConfigs") or []
+            r2_configs = payload.get("r2Configs") or existing_raw.get("r2Configs") or []
+
+            # Preserve masked keys if payload contains masked placeholder
+            def restore_masked_mineru(c):
+                existing = next((e for e in existing_raw.get("mineruConfigs", []) if e.get("id") == c.get("id")), {})
+                token = c.get("mineruToken", "")
+                if str(token).startswith("•••"):
+                    token = existing.get("mineruToken", "")
+                return {**c, "mineruToken": token}
+
+            def restore_masked_llm(c):
+                existing = next((e for e in existing_raw.get("llmConfigs", []) if e.get("id") == c.get("id")), {})
+                key = c.get("llmApiKey", "")
+                if str(key).startswith("•••"):
+                    key = existing.get("llmApiKey", "")
+                return {**c, "llmApiKey": key}
+
+            def restore_masked_r2(c):
+                existing = next((e for e in existing_raw.get("r2Configs", []) if e.get("id") == c.get("id")), {})
+                secret = c.get("r2SecretAccessKey", "")
+                if str(secret).startswith("•••"):
+                    secret = existing.get("r2SecretAccessKey", "")
+                return {**c, "r2SecretAccessKey": secret}
+
+            mineru_configs = [restore_masked_mineru(c) for c in mineru_configs]
+            llm_configs = [restore_masked_llm(c) for c in llm_configs]
+            r2_configs = [restore_masked_r2(c) for c in r2_configs]
+
+            rec.configs_json = json.dumps({
+                "mineruConfigs": mineru_configs,
+                "llmConfigs": llm_configs,
+                "r2Configs": r2_configs,
+            }, ensure_ascii=False)
+
+            primary_mineru = next((c for c in mineru_configs if c.get("isPrimary")), mineru_configs[0] if mineru_configs else {})
+            primary_llm = next((c for c in llm_configs if c.get("isPrimary")), llm_configs[0] if llm_configs else {})
+            primary_r2 = next((c for c in r2_configs if c.get("isPrimary")), r2_configs[0] if r2_configs else {})
+
+            rec.mineru_token = primary_mineru.get("mineruToken") or ""
+            rec.mineru_base_url = primary_mineru.get("mineruBaseUrl") or ""
+            rec.llm_model = primary_llm.get("llmModel") or ""
+            rec.llm_api_key = primary_llm.get("llmApiKey") or ""
+            rec.llm_base_url = primary_llm.get("llmBaseUrl") or ""
+            rec.r2_account_id = primary_r2.get("r2AccountId") or ""
+            rec.r2_bucket = primary_r2.get("r2Bucket") or ""
+            rec.r2_access_key_id = primary_r2.get("r2AccessKeyId") or ""
+            rec.r2_secret_access_key = primary_r2.get("r2SecretAccessKey") or ""
+            rec.r2_endpoint_url = primary_r2.get("r2EndpointUrl") or ""
+            rec.r2_prefix = primary_r2.get("r2Prefix") or ""
             rec.updated_at = now
+
         return UserSettingsRepository.get_user_settings(user_id)
 
 class ConfigRepository:
@@ -196,7 +286,25 @@ class ConfigRepository:
         def mask_val(v):
             return "••••••••" if masked and v else v
 
+        mineru_configs = user_settings.get("mineruConfigs") or [{
+            "id": "mineru_default", "name": "系统默认 MinerU", "mineruToken": mineru_token, "mineruBaseUrl": mineru_base_url, "isPrimary": True
+        }]
+        llm_configs = user_settings.get("llmConfigs") or [{
+            "id": "llm_default", "name": "系统默认大模型", "llmModel": model_name, "llmApiKey": api_key, "llmBaseUrl": base_url, "isPrimary": True
+        }]
+        r2_configs = user_settings.get("r2Configs") or [{
+            "id": "r2_default", "name": "系统默认 R2", "r2AccountId": r2_account_id, "r2Bucket": r2_bucket, "r2AccessKeyId": r2_access_key_id, "r2SecretAccessKey": r2_secret_access_key, "r2EndpointUrl": r2_endpoint_url, "r2Prefix": r2_prefix, "isPrimary": True
+        }]
+
+        # Mask sensitive keys in configs list if requested
+        masked_mineru_configs = [{**c, "mineruToken": mask_val(c.get("mineruToken", ""))} for c in mineru_configs]
+        masked_llm_configs = [{**c, "llmApiKey": mask_val(c.get("llmApiKey", ""))} for c in llm_configs]
+        masked_r2_configs = [{**c, "r2SecretAccessKey": mask_val(c.get("r2SecretAccessKey", ""))} for c in r2_configs]
+
         return {
+            "mineruConfigs": masked_mineru_configs,
+            "llmConfigs": masked_llm_configs,
+            "r2Configs": masked_r2_configs,
             "mineruToken": mask_val(mineru_token),
             "mineruBaseUrl": mineru_base_url,
             "llmModel": model_name,

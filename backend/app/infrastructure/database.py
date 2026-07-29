@@ -31,6 +31,9 @@ def initialize_database():
     if "user_id" not in {column["name"] for column in inspect(engine).get_columns("chat_messages")}:
         with engine.begin() as conn:
             conn.exec_driver_sql("ALTER TABLE chat_messages ADD COLUMN user_id VARCHAR")
+    if "user_settings" in inspect(engine).get_table_names() and "configs_json" not in {column["name"] for column in inspect(engine).get_columns("user_settings")}:
+        with engine.begin() as conn:
+            conn.exec_driver_sql("ALTER TABLE user_settings ADD COLUMN configs_json TEXT")
     with SessionLocal.begin() as s:
         s.merge(SchemaMetadataRecord(key="schema_version", value="2"))
         if s.scalar(select(ModelRecord.id).limit(1)) is None:

@@ -118,5 +118,6 @@ class UserSettingsRecord(Base):
     r2_secret_access_key: Mapped[str | None] = mapped_column(Text)
     r2_endpoint_url: Mapped[str | None] = mapped_column(Text)
     r2_prefix: Mapped[str | None] = mapped_column(Text)
+    configs_json: Mapped[str | None] = mapped_column(Text)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
     user: Mapped[UserRecord] = relationship(back_populates="settings")
