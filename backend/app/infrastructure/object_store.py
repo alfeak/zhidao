@@ -25,14 +25,14 @@ class R2ObjectStore:
             settings = UserSettingsRepository.get_user_settings(user_id)
         settings = settings or {}
 
-        account_id = settings.get("r2AccountId") or os.getenv("R2_ACCOUNT_ID", "").strip()
-        self.bucket = settings.get("r2Bucket") or os.getenv("R2_BUCKET", "").strip()
-        self.prefix = (settings.get("r2Prefix") or os.getenv("R2_PREFIX", "mineru")).strip("/")
-        access_key = settings.get("r2AccessKeyId") or os.getenv("R2_ACCESS_KEY_ID", "").strip()
-        secret_key = settings.get("r2SecretAccessKey") or os.getenv("R2_SECRET_ACCESS_KEY", "").strip()
-        endpoint = settings.get("r2EndpointUrl") or os.getenv("R2_ENDPOINT_URL", "").strip() or (f"https://{account_id}.r2.cloudflarestorage.com" if account_id else "")
+        account_id = (settings.get("r2AccountId") or "").strip()
+        self.bucket = (settings.get("r2Bucket") or "").strip()
+        self.prefix = (settings.get("r2Prefix") or "mineru").strip("/")
+        access_key = (settings.get("r2AccessKeyId") or "").strip()
+        secret_key = (settings.get("r2SecretAccessKey") or "").strip()
+        endpoint = (settings.get("r2EndpointUrl") or "").strip() or (f"https://{account_id}.r2.cloudflarestorage.com" if account_id else "")
         if not all((self.bucket, access_key, secret_key, endpoint)):
-            raise ObjectStoreError("R2_BUCKET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY and R2_ENDPOINT_URL (or R2_ACCOUNT_ID) are required.")
+            raise ObjectStoreError("未在【设置 -> R2存储设置】中配置有效的主 Bucket、Access Key ID、Secret Access Key 及 Endpoint URL。")
         self.client = boto3.client("s3", endpoint_url=endpoint, aws_access_key_id=access_key, aws_secret_access_key=secret_key, region_name="auto", config=Config(signature_version="s3v4"))
 
     def key_for(self, document_id: str, archive_path: str) -> str:

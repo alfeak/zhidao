@@ -303,6 +303,31 @@ export default function SettingsModal({ isOpen, onClose }: Props) {
     setIsAddingNew(false);
   };
 
+  const handleTestMineru = async () => {
+    setTestingModel(true);
+    setTestResult(null);
+    try {
+      const response = await fetch('/api/config/test-mineru', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mineruToken,
+          mineruBaseUrl,
+        }),
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        setTestResult({ success: true, message: data.message || 'MinerU 服务连接正常！' });
+      } else {
+        setTestResult({ success: false, message: data.detail || data.error || 'MinerU 连接测试失败，请检查 Token' });
+      }
+    } catch (err: any) {
+      setTestResult({ success: false, message: err.message || 'MinerU 测试网络异常' });
+    } finally {
+      setTestingModel(false);
+    }
+  };
+
   const handleTestLlm = async () => {
     setTestingModel(true);
     setTestResult(null);
@@ -320,10 +345,39 @@ export default function SettingsModal({ isOpen, onClose }: Props) {
       if (response.ok && data.success) {
         setTestResult({ success: true, message: data.message || '连接成功！' });
       } else {
-        setTestResult({ success: false, message: data.detail || '连接测试失败，请检查 API Key 和 Base URL' });
+        setTestResult({ success: false, message: data.detail || data.error || '连接测试失败，请检查 API Key 和 Base URL' });
       }
     } catch (err: any) {
       setTestResult({ success: false, message: err.message || '连接测试异常' });
+    } finally {
+      setTestingModel(false);
+    }
+  };
+
+  const handleTestR2 = async () => {
+    setTestingModel(true);
+    setTestResult(null);
+    try {
+      const response = await fetch('/api/config/test-r2', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          r2AccountId,
+          r2Bucket,
+          r2AccessKeyId,
+          r2SecretAccessKey,
+          r2EndpointUrl,
+          r2Prefix,
+        }),
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        setTestResult({ success: true, message: data.message || 'R2 存储桶连接成功！' });
+      } else {
+        setTestResult({ success: false, message: data.detail || data.error || 'R2 连接测试失败，请检查凭据与 Bucket' });
+      }
+    } catch (err: any) {
+      setTestResult({ success: false, message: err.message || 'R2 测试网络异常' });
     } finally {
       setTestingModel(false);
     }
@@ -470,6 +524,23 @@ export default function SettingsModal({ isOpen, onClose }: Props) {
                       className="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs outline-none focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
                     />
                   </div>
+
+                  <div className="pt-1 flex items-center justify-between">
+                    <button
+                      type="button"
+                      onClick={handleTestMineru}
+                      disabled={testingModel}
+                      className="flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer"
+                    >
+                      {testingModel ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileCode className="h-3 w-3 text-cyan-500" />}
+                      测试此配置
+                    </button>
+                    {testResult && (
+                      <span className={`text-[11px] font-medium ${testResult.success ? 'text-emerald-500' : 'text-rose-500'}`}>
+                        {testResult.message}
+                      </span>
+                    )}
+                  </div>
                 </>
               )}
 
@@ -526,7 +597,7 @@ export default function SettingsModal({ isOpen, onClose }: Props) {
                       type="button"
                       onClick={handleTestLlm}
                       disabled={testingModel}
-                      className="flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                      className="flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer"
                     >
                       {testingModel ? <Loader2 className="h-3 w-3 animate-spin" /> : <Cpu className="h-3 w-3 text-cyan-500" />}
                       测试此配置
@@ -591,6 +662,23 @@ export default function SettingsModal({ isOpen, onClose }: Props) {
                       placeholder="https://<ACCOUNT_ID>.r2.cloudflarestorage.com"
                       className="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs outline-none focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
                     />
+                  </div>
+
+                  <div className="col-span-2 pt-1 flex items-center justify-between">
+                    <button
+                      type="button"
+                      onClick={handleTestR2}
+                      disabled={testingModel}
+                      className="flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer"
+                    >
+                      {testingModel ? <Loader2 className="h-3 w-3 animate-spin" /> : <HardDrive className="h-3 w-3 text-cyan-500" />}
+                      测试此配置
+                    </button>
+                    {testResult && (
+                      <span className={`text-[11px] font-medium ${testResult.success ? 'text-emerald-500' : 'text-rose-500'}`}>
+                        {testResult.message}
+                      </span>
+                    )}
                   </div>
                 </div>
               )}

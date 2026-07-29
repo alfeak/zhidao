@@ -102,6 +102,77 @@ async def test_model(request: Request, payload: dict = Body(...), zhidao_session
     result = await papers.llm.generate({"models": [model]}, "Reply with a short successful connection message.")
     return {"success": True, "message": result}
 
+@router.post("/config/test-mineru")
+async def test_mineru(request: Request, payload: dict = Body(...), zhidao_session: str | None = Cookie(None)):
+    import httpx
+    user = get_current_user_from_req(request, zhidao_session)
+    user_id = user["id"] if user else None
+    user_cfg = config.get_for_user(user_id, masked=False)
+
+    token = payload.get("mineruToken")
+    if not token or str(token).startswith("•••"):
+        token = user_cfg.get("mineruToken") or ""
+    base_url = (payload.get("mineruBaseUrl") or user_cfg.get("mineruBaseUrl") or "https://mineru.net/api/v4").rstrip("/")
+
+    if not token:
+        raise ValidationError("MinerU Token 不能为空，请输入有效的 API Token。")
+
+    headers = {"Authorization": f"Bearer {token}"}
+    async with httpx.AsyncClient(timeout=15, follow_redirects=True, trust_env=False) as client:
+        try:
+            response = await client.get(f"{base_url}/extract/task/health_test", headers=headers)
+            if response.status_code == 401:
+                raise ValidationError("MinerU Token 鉴权失败 (401 Unauthorized)，当前 Token 无效。")
+            if response.status_code in (200, 400, 404):
+                return {"success": True, "message": "MinerU 服务连接正常，Token 校验通过！"}
+            response.raise_for_status()
+            return {"success": True, "message": "MinerU 服务连接正常！"}
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 401:
+                raise ValidationError("MinerU Token 鉴权失败 (401 Unauthorized)，当前 Token 无效。")
+            raise ValidationError(f"MinerU API 响应异常 ({e.response.status_code}): {e.response.text}")
+        except httpx.RequestError as e:
+            raise ValidationError(f"无法连接至 MinerU 服务端 ({base_url}): {str(e)}")
+
+@router.post("/config/test-r2")
+def test_r2(request: Request, payload: dict = Body(...), zhidao_session: str | None = Cookie(None)):
+    import boto3
+    from botocore.config import Config
+    user = get_current_user_from_req(request, zhidao_session)
+    user_id = user["id"] if user else None
+    user_cfg = config.get_for_user(user_id, masked=False)
+
+    account_id = (payload.get("r2AccountId") or user_cfg.get("r2AccountId") or "").strip()
+    bucket = (payload.get("r2Bucket") or user_cfg.get("r2Bucket") or "").strip()
+    access_key = (payload.get("r2AccessKeyId") or user_cfg.get("r2AccessKeyId") or "").strip()
+    secret_key = payload.get("r2SecretAccessKey")
+    if not secret_key or str(secret_key).startswith("•••"):
+        secret_key = user_cfg.get("r2SecretAccessKey") or ""
+    endpoint = (payload.get("r2EndpointUrl") or user_cfg.get("r2EndpointUrl") or "").strip() or (f"https://{account_id}.r2.cloudflarestorage.com" if account_id else "")
+
+    if not bucket:
+        raise ValidationError("Bucket 名称不能为空。")
+    if not access_key:
+        raise ValidationError("Access Key ID 不能为空。")
+    if not secret_key:
+        raise ValidationError("Secret Access Key 不能为空。")
+    if not endpoint:
+        raise ValidationError("Endpoint URL 或 Account ID 不能为空。")
+
+    try:
+        s3_client = boto3.client(
+            "s3",
+            endpoint_url=endpoint,
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+            region_name="auto",
+            config=Config(signature_version="s3v4", connect_timeout=10, read_timeout=10)
+        )
+        s3_client.head_bucket(Bucket=bucket)
+        return {"success": True, "message": f"成功连接至 R2 存储桶 [{bucket}]！"}
+    except Exception as e:
+        raise ValidationError(f"R2 存储桶连接失败: {str(e)}")
+
 @router.get("/papers/{paper_id}/file")
 def get_parsed_pdf(paper_id: str):
     from .infrastructure.database import SessionLocal
