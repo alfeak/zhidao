@@ -59,16 +59,28 @@ class MinerUClient:
 
             zip_url = await self._wait_for_result(client, headers, task_id)
             
-            # When downloading pre-signed OSS CDN ZIP, do NOT send custom Authorization headers
-            try:
-                archive = await client.get(zip_url, headers={})
-                archive.raise_for_status()
-            except httpx.HTTPStatusError as err:
-                raise MinerUError(f"下载 MinerU OSS CDN 解析结果包失败 ({err.response.status_code}): {err.response.text}")
-            except httpx.RequestError as err:
-                raise MinerUError(f"无法连接至 MinerU OSS CDN 存储 endpoint ({zip_url}): {str(err)}")
+            # When downloading pre-signed OSS CDN ZIP:
+            # 1. Do NOT send custom Authorization headers
+            # 2. Retry up to 3 times if CDN network drops
+            archive_res = None
+            last_download_err = None
+            for attempt in range(1, 4):
+                try:
+                    res = await client.get(zip_url, headers={})
+                    res.raise_for_status()
+                    archive_res = res
+                    break
+                except httpx.HTTPStatusError as err:
+                    last_download_err = f"HTTP {err.response.status_code}: {err.response.text}"
+                    await asyncio.sleep(attempt * 2)
+                except httpx.RequestError as err:
+                    last_download_err = f"网络连接异常: {str(err)}"
+                    await asyncio.sleep(attempt * 2)
 
-        return self.extract_archive(archive.content)
+            if not archive_res or not archive_res.is_success:
+                raise MinerUError(f"下载 MinerU OSS CDN 解析包失败 ({zip_url}): {last_download_err}")
+
+        return self.extract_archive(archive_res.content)
 
     async def _wait_for_result(self, client, headers, task_id):
         for _ in range(120):

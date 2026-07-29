@@ -20,6 +20,7 @@ interface Props {
   paper: Paper | null; selectedBlock: MarkdownBlock | null; onSelectBlock: (block: MarkdownBlock) => void;
   remarks: HighlightRemark[]; onAddRemark: (blockIndex: number, comment: string, color: string) => void; onDeleteRemark: (id: string) => void;
   translationLanguages: TranslationLanguage[]; onTranslate: (code: string) => Promise<void>; loadingAction: string | null;
+  onRetryDecode?: (id: string) => void;
 }
 
 const REMARK_COLORS = [
@@ -98,7 +99,7 @@ function JumpContextMenu({ mode, hasTranslation, onJump }: { mode: ReaderMode; h
   </div>;
 }
 
-export default function ReaderCore({ paper, selectedBlock, onSelectBlock, remarks, onAddRemark, onDeleteRemark, translationLanguages, onTranslate, loadingAction }: Props) {
+export default function ReaderCore({ paper, selectedBlock, onSelectBlock, remarks, onAddRemark, onDeleteRemark, translationLanguages, onTranslate, loadingAction, onRetryDecode }: Props) {
   const [mode, setMode] = useState<ReaderMode>('pdf');
   const [language, setLanguage] = useState<string | null>(null);
   const [blocks, setBlocks] = useState<MarkdownBlock[]>([]);
@@ -398,6 +399,51 @@ export default function ReaderCore({ paper, selectedBlock, onSelectBlock, remark
   }, [pdfScale]);
 
   if (!paper) return <div className="flex-1 flex items-center justify-center text-slate-400"><FileText className="w-12 h-12" /></div>;
+
+  if (paper.decodeStatus === 'failed') {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center p-8 bg-slate-50/50 dark:bg-slate-950/40 font-sans select-none">
+        <div className="max-w-xl w-full rounded-2xl border border-rose-200 bg-white p-6 shadow-xl dark:border-rose-900/40 dark:bg-slate-900 space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-rose-500/10 text-rose-600 dark:bg-rose-500/20 dark:text-rose-400">
+              <FileText className="h-6 w-6" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">论文解析 / 解码失败</h3>
+              <p className="text-xs text-slate-400">无法从 MinerU 或云端对象存储提取正文排版及 Markdown 文本</p>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-rose-200 bg-rose-50/60 p-3.5 dark:border-rose-950 dark:bg-rose-950/30">
+            <span className="block text-[11px] font-bold text-rose-800 dark:text-rose-400 mb-1">具体错误日志 (Error Details):</span>
+            <p className="font-mono text-xs text-rose-700 dark:text-rose-300 break-all leading-relaxed whitespace-pre-wrap select-text">
+              {paper.decodeError || '未知解析错误'}
+            </p>
+          </div>
+
+          <div className="flex items-center justify-between pt-2">
+            <a
+              href={paper.url}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs text-cyan-600 dark:text-cyan-400 hover:underline"
+            >
+              在浏览器中打开原始 PDF 链接 ↗
+            </a>
+            {onRetryDecode && (
+              <button
+                type="button"
+                onClick={() => onRetryDecode(paper.id)}
+                className="flex items-center gap-1.5 rounded-lg bg-rose-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-rose-700 transition cursor-pointer"
+              >
+                重新尝试解码
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
   const currentScale = mode === 'pdf' ? pdfScale : mdScale;
   const handleZoomIn = () => (mode === 'pdf' ? setPdfScale((s) => Math.min(3, s + 0.15)) : setMdScale((s) => Math.min(3, s + 0.15)));
   const handleZoomOut = () => (mode === 'pdf' ? setPdfScale((s) => Math.max(0.5, s - 0.15)) : setMdScale((s) => Math.max(0.5, s - 0.15)));

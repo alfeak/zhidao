@@ -141,7 +141,10 @@ export default function PaperList({
                     )}
 
                     {paper.decodeStatus === 'failed' && (
-                      <span className="inline-flex items-center gap-1 text-[9px] font-semibold text-rose-700 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/20 px-1.5 py-0.5 rounded border border-rose-200 dark:border-rose-900/30">
+                      <span
+                        className="inline-flex items-center gap-1 text-[9px] font-semibold text-rose-700 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/20 px-1.5 py-0.5 rounded border border-rose-200 dark:border-rose-900/30"
+                        title={paper.decodeError || '解码失败'}
+                      >
                         <AlertCircle className="w-2.5 h-2.5" />
                         <span>解码失败</span>
                       </span>
@@ -151,6 +154,34 @@ export default function PaperList({
                       {paper.url}
                     </span>
                   </div>
+
+                  {paper.decodeStatus === 'failed' && paper.decodeError && (
+                    <div
+                      className="mt-2 rounded border border-rose-200 bg-rose-50/80 p-2 text-[11px] text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-300 space-y-1"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="flex items-center justify-between font-semibold">
+                        <span className="flex items-center gap-1 text-[10px]">
+                          <AlertCircle className="h-3 w-3 shrink-0 text-rose-500" />
+                          错误原因:
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onRetryDecode(paper.id);
+                          }}
+                          className="inline-flex items-center gap-1 rounded bg-rose-600 px-1.5 py-0.5 text-[9px] font-medium text-white hover:bg-rose-700 transition cursor-pointer"
+                        >
+                          <RefreshCw className="h-2.5 w-2.5" />
+                          重试解码
+                        </button>
+                      </div>
+                      <p className="line-clamp-3 font-mono text-[10px] leading-tight opacity-90 break-all select-text">
+                        {paper.decodeError}
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 {/* Hover Quick Actions */}
