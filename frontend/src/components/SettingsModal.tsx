@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { X, Eye, EyeOff, Save, CheckCircle, AlertCircle, Loader2, Cpu, HardDrive, FileCode, Plus, Star, Trash2, Edit2, Check } from 'lucide-react';
 
 interface MinerUConfig {
@@ -37,6 +37,7 @@ interface Props {
 
 export default function SettingsModal({ isOpen, onClose }: Props) {
   const [activeTab, setActiveTab] = useState<'mineru' | 'llm' | 'r2'>('llm');
+  const fetchRequestIdRef = useRef(0);
 
   // Lists state
   const [mineruConfigs, setMineruConfigs] = useState<MinerUConfig[]>([]);
@@ -74,24 +75,38 @@ export default function SettingsModal({ isOpen, onClose }: Props) {
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
-  const fetchConfig = () => {
+  const applyFetchedConfig = (data: {
+    mineruConfigs?: MinerUConfig[];
+    llmConfigs?: LlmConfig[];
+    r2Configs?: R2Config[];
+  }) => {
+    setMineruConfigs(data.mineruConfigs || []);
+    setLlmConfigs(data.llmConfigs || []);
+    setR2Configs(data.r2Configs || []);
+  };
+
+  const fetchConfig = async () => {
+    const requestId = ++fetchRequestIdRef.current;
     setLoading(true);
-    fetch('/api/config')
-      .then((res) => res.json())
-      .then((data) => {
-        setMineruConfigs(data.mineruConfigs || []);
-        setLlmConfigs(data.llmConfigs || []);
-        setR2Configs(data.r2Configs || []);
-      })
-      .catch((err) => console.error('Error fetching settings:', err))
-      .finally(() => setLoading(false));
+    try {
+      const res = await fetch('/api/config');
+      const data = await res.json();
+      if (requestId !== fetchRequestIdRef.current) return;
+      applyFetchedConfig(data);
+    } catch (err) {
+      console.error('Error fetching settings:', err);
+    } finally {
+      if (requestId === fetchRequestIdRef.current) {
+        setLoading(false);
+      }
+    }
   };
 
   useEffect(() => {
     if (!isOpen) return;
     setEditingId(null);
     setIsAddingNew(false);
-    fetchConfig();
+    void fetchConfig();
   }, [isOpen]);
 
   if (!isOpen) return null;
@@ -101,6 +116,7 @@ export default function SettingsModal({ isOpen, onClose }: Props) {
     customLlm = llmConfigs,
     customR2 = r2Configs
   ) => {
+    fetchRequestIdRef.current += 1;
     setLoading(true);
     setSaveSuccess(false);
     try {
@@ -113,10 +129,11 @@ export default function SettingsModal({ isOpen, onClose }: Props) {
           r2Configs: customR2,
         }),
       });
+      const data = await response.json();
       if (response.ok) {
+        applyFetchedConfig(data.config || data);
         setSaveSuccess(true);
         setTimeout(() => setSaveSuccess(false), 3000);
-        fetchConfig();
       }
     } catch (err) {
       console.error('Error saving settings:', err);
@@ -127,18 +144,21 @@ export default function SettingsModal({ isOpen, onClose }: Props) {
 
   // Primary toggle handlers
   const setPrimaryMinerU = (id: string) => {
+    if (loading) return;
     const updated = mineruConfigs.map((c) => ({ ...c, isPrimary: c.id === id }));
     setMineruConfigs(updated);
     void handleSave(updated, llmConfigs, r2Configs);
   };
 
   const setPrimaryLlm = (id: string) => {
+    if (loading) return;
     const updated = llmConfigs.map((c) => ({ ...c, isPrimary: c.id === id }));
     setLlmConfigs(updated);
     void handleSave(mineruConfigs, updated, r2Configs);
   };
 
   const setPrimaryR2 = (id: string) => {
+    if (loading) return;
     const updated = r2Configs.map((c) => ({ ...c, isPrimary: c.id === id }));
     setR2Configs(updated);
     void handleSave(mineruConfigs, llmConfigs, updated);
@@ -146,6 +166,7 @@ export default function SettingsModal({ isOpen, onClose }: Props) {
 
   // Delete handlers
   const deleteMinerU = (id: string) => {
+    if (loading) return;
     if (mineruConfigs.length <= 1) return;
     const updated = mineruConfigs.filter((c) => c.id !== id);
     if (!updated.some((c) => c.isPrimary)) updated[0].isPrimary = true;
@@ -154,6 +175,7 @@ export default function SettingsModal({ isOpen, onClose }: Props) {
   };
 
   const deleteLlm = (id: string) => {
+    if (loading) return;
     if (llmConfigs.length <= 1) return;
     const updated = llmConfigs.filter((c) => c.id !== id);
     if (!updated.some((c) => c.isPrimary)) updated[0].isPrimary = true;
@@ -162,6 +184,7 @@ export default function SettingsModal({ isOpen, onClose }: Props) {
   };
 
   const deleteR2 = (id: string) => {
+    if (loading) return;
     if (r2Configs.length <= 1) return;
     const updated = r2Configs.filter((c) => c.id !== id);
     if (!updated.some((c) => c.isPrimary)) updated[0].isPrimary = true;
@@ -171,6 +194,7 @@ export default function SettingsModal({ isOpen, onClose }: Props) {
 
   // Start Form
   const startAddNew = () => {
+    if (loading) return;
     setIsAddingNew(true);
     setEditingId(null);
     setTestResult(null);
@@ -196,6 +220,7 @@ export default function SettingsModal({ isOpen, onClose }: Props) {
   };
 
   const startEdit = (id: string) => {
+    if (loading) return;
     setIsAddingNew(false);
     setEditingId(id);
     setTestResult(null);
@@ -227,6 +252,7 @@ export default function SettingsModal({ isOpen, onClose }: Props) {
   };
 
   const saveFormItem = () => {
+    if (loading) return;
     if (activeTab === 'mineru') {
       let updated: MinerUConfig[];
       if (isAddingNew) {

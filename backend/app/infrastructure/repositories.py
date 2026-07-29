@@ -74,6 +74,8 @@ class PaperRepository:
             if not x: return
             x.decode_status, x.decode_error = "done", None
             x.artifacts.clear()
+            # Flush deletions before reusing the same object keys on retry/re-import.
+            s.flush()
             for n, a in enumerate(artifacts):
                 s.add(DocumentArtifactRecord(id=f"{id}_{n}", document_id=id, archive_path=a.archive_path, object_key=a.object_key, kind=artifact_kind(a), content_type=a.content_type, byte_size=a.byte_size, sha256=a.sha256, translation_language=translation_language_from_path(a.archive_path)))
     def save_translation(self, id, artifact, language_code):

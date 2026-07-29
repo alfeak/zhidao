@@ -174,7 +174,9 @@ def test_r2(request: Request, payload: dict = Body(...), zhidao_session: str | N
         raise ValidationError(f"R2 存储桶连接失败: {str(e)}")
 
 @router.get("/papers/{paper_id}/file")
-def get_parsed_pdf(paper_id: str):
+def get_parsed_pdf(request: Request, paper_id: str, zhidao_session: str | None = Cookie(None)):
+    user = get_current_user_from_req(request, zhidao_session)
+    user_id = user["id"] if user else None
     from .infrastructure.database import SessionLocal
     from .infrastructure.orm_models import DocumentArtifactRecord
     from sqlalchemy import select
@@ -182,28 +184,34 @@ def get_parsed_pdf(paper_id: str):
         artifact = session.scalar(select(DocumentArtifactRecord).where(DocumentArtifactRecord.document_id == paper_id, DocumentArtifactRecord.kind == "pdf"))
     if not artifact: raise HTTPException(status_code=404, detail="Parsed PDF is not available yet.")
     from .infrastructure.object_store import R2ObjectStore
-    body, media_type = R2ObjectStore().stream(artifact.object_key)
+    body, media_type = R2ObjectStore(user_id=user_id).stream(artifact.object_key)
     return StreamingResponse(body.iter_chunks(), media_type=media_type)
 
 @router.get("/papers/{paper_id}/layout-boxes")
-def get_layout_boxes(paper_id: str):
+def get_layout_boxes(request: Request, paper_id: str, zhidao_session: str | None = Cookie(None)):
+    user = get_current_user_from_req(request, zhidao_session)
+    user_id = user["id"] if user else None
     papers.paper(paper_id)
-    return {"boxes": papers.layout_boxes(paper_id)}
+    return {"boxes": papers.layout_boxes(paper_id, user_id=user_id)}
 
 @router.get("/papers/{paper_id}/assets/{asset_path:path}")
-def get_paper_asset(paper_id: str, asset_path: str):
+def get_paper_asset(request: Request, paper_id: str, asset_path: str, zhidao_session: str | None = Cookie(None)):
+    user = get_current_user_from_req(request, zhidao_session)
+    user_id = user["id"] if user else None
     artifact = papers.artifact(paper_id, asset_path)
     from .infrastructure.object_store import R2ObjectStore
-    body, media_type = R2ObjectStore().stream(artifact.object_key)
+    body, media_type = R2ObjectStore(user_id=user_id).stream(artifact.object_key)
     return StreamingResponse(body.iter_chunks(), media_type=media_type)
 
 @router.get("/papers/{paper_id}/markdown")
-def get_markdown(paper_id: str, target_language: str | None = Query(None, alias="targetLanguage")):
+def get_markdown(request: Request, paper_id: str, target_language: str | None = Query(None, alias="targetLanguage"), zhidao_session: str | None = Cookie(None)):
+    user = get_current_user_from_req(request, zhidao_session)
+    user_id = user["id"] if user else None
     if target_language:
-        markdown, _ = papers.translated_markdown(paper_id, target_language)
-        return {"content": markdown, "blocks": papers.translated_markdown_blocks(paper_id, target_language), "targetLanguage": target_language, "isTranslation": True}
-    markdown, _ = papers.markdown(paper_id)
-    return {"content": markdown, "blocks": papers.markdown_blocks(paper_id), "isTranslation": False}
+        markdown, _ = papers.translated_markdown(paper_id, target_language, user_id=user_id)
+        return {"content": markdown, "blocks": papers.translated_markdown_blocks(paper_id, target_language, user_id=user_id), "targetLanguage": target_language, "isTranslation": True}
+    markdown, _ = papers.markdown(paper_id, user_id=user_id)
+    return {"content": markdown, "blocks": papers.markdown_blocks(paper_id, user_id=user_id), "isTranslation": False}
 
 @router.post("/papers/{paper_id}/translations", status_code=202)
 async def translate_markdown(request: Request, paper_id: str, payload: dict = Body(...), zhidao_session: str | None = Cookie(None)):
@@ -221,7 +229,7 @@ def list_papers(): return papers.list_papers()
 async def import_paper(request: Request, payload: dict, background_tasks: BackgroundTasks, zhidao_session: str | None = Cookie(None)):
     user = get_current_user_from_req(request, zhidao_session)
     user_id = user["id"] if user else None
-    paper = await papers.import_paper(payload.get("url"), payload.get("title"))
+    paper = await papers.import_paper(payload.get("url"), payload.get("title"), user_id=user_id)
     if not paper.get("isDecoded"):
         background_tasks.add_task(papers.decode, paper["id"], user_id)
     return {"success": True, "paper": paper}
@@ -302,7 +310,7 @@ def add_remark(request: Request, payload: dict, zhidao_session: str | None = Coo
     block_index = payload.get("blockIndex")
     if isinstance(block_index, bool) or not isinstance(block_index, int) or block_index < 0:
         raise ValidationError("blockIndex must be a non-negative integer")
-    if block_index not in papers.markdown_block_indices(payload["paperId"]):
+    if block_index not in papers.markdown_block_indices(payload["paperId"], user_id=user_id):
         raise ValidationError("blockIndex does not refer to a Markdown block in this paper")
     comment = str(payload["comment"]).strip()
     if not comment:

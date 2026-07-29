@@ -13,6 +13,8 @@ def test_extract_archive_keeps_markdown_pdf_and_images():
 
     result = MinerUClient.extract_archive(buffer.getvalue())
 
-    assert result.markdown.startswith("# Paper")
-    assert result.pdf_bytes.startswith(b"%PDF-")
-    assert result.assets == {"images/figure.png": b"png-bytes"}
+    assert result.markdown_path == "result/full.md"
+    assert result.pdf_path == "result/full.pdf"
+    assert result.files["result/full.md"].startswith(b"# Paper")
+    assert result.files["result/full.pdf"].startswith(b"%PDF-")
+    assert result.files["result/images/figure.png"] == b"png-bytes"

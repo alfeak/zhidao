@@ -39,7 +39,7 @@ class PaperService:
         paper = self.papers.get(id)
         if not paper: raise NotFoundError("Paper not found")
         return paper
-    async def import_paper(self, url, title=None):
+    async def import_paper(self, url, title=None, user_id: str | None = None):
         if not url or not url.strip(): raise ValidationError("Paper URL is required")
         r = await self.title_resolver.resolve(url, title)
         paper_id = self.identifier_for_url(r.url)
@@ -47,12 +47,12 @@ class PaperService:
         # 1. Check if paper already exists in DB and is decoded
         existing = self.papers.get(paper_id)
         if existing and existing.get("isDecoded"):
-            self.reindex_paper(paper_id)
+            self.reindex_paper(paper_id, user_id=user_id)
             return existing
 
         # 2. Check if R2 storage already contains cached artifacts for this paper URL
         try:
-            cached_artifacts = R2ObjectStore().list_cached_artifacts(paper_id)
+            cached_artifacts = R2ObjectStore(user_id=user_id).list_cached_artifacts(paper_id)
         except Exception:
             cached_artifacts = []
 
@@ -62,12 +62,12 @@ class PaperService:
         if has_markdown:
             self.papers.create({"id": paper_id, "title": r.title, "url": r.url, "importedAt": self.now()})
             self.papers.save_artifacts(paper_id, cached_artifacts)
-            self.reindex_paper(paper_id)
+            self.reindex_paper(paper_id, user_id=user_id)
             return self.papers.get(paper_id)
 
         # 4. If R2 cache miss, create initial paper record for background MinerU decoding
         created = self.papers.create({"id": paper_id, "title": r.title, "url": r.url, "importedAt": self.now()})
-        self.reindex_paper(paper_id)
+        self.reindex_paper(paper_id, user_id=user_id)
         return created
 
     def delete_paper(self, id):
@@ -94,13 +94,13 @@ class PaperService:
                 cached_artifacts = []
             if any(a.archive_path.endswith(".md") and not a.archive_path.startswith("translations/") for a in cached_artifacts):
                 self.papers.save_artifacts(id, cached_artifacts)
-                self.reindex_paper(id)
+                self.reindex_paper(id, user_id=user_id)
                 return
 
             mineru_client = MinerUClient(user_id=user_id)
             result = await mineru_client.parse_url(paper["url"])
             self.papers.save_artifacts(id, r2.put_archive(id, result.files))
-            self.reindex_paper(id)
+            self.reindex_paper(id, user_id=user_id)
         except Exception as e:
             self.papers.set_status(id, "failed", str(e))
 
@@ -118,11 +118,11 @@ class PaperService:
         if not a: raise NotFoundError("Markdown was not found.")
         return a
 
-    def markdown(self, id):
+    def markdown(self, id, user_id: str | None = None):
         artifact = self.markdown_artifact(id)
-        return R2ObjectStore().read(artifact.object_key).decode("utf-8"), artifact
+        return R2ObjectStore(user_id=user_id).read(artifact.object_key).decode("utf-8"), artifact
 
-    def content_list(self, id: str) -> list[dict]:
+    def content_list(self, id: str, user_id: str | None = None) -> list[dict]:
         """Read MinerU's reading-order content list, the canonical bbox source."""
         from ..infrastructure.database import SessionLocal
         from ..infrastructure.orm_models import DocumentArtifactRecord
@@ -137,7 +137,7 @@ class PaperService:
         if not artifact:
             return []
         try:
-            payload = json.loads(R2ObjectStore().read(artifact.object_key))
+            payload = json.loads(R2ObjectStore(user_id=user_id).read(artifact.object_key))
         except (UnicodeDecodeError, json.JSONDecodeError):
             return []
         return payload if isinstance(payload, list) else []
@@ -165,11 +165,11 @@ class PaperService:
             return str(item.get("code_body") or "").strip()
         return ""
 
-    def markdown_blocks(self, id: str) -> list[dict]:
+    def markdown_blocks(self, id: str, user_id: str | None = None) -> list[dict]:
         """Expose compact, bbox-addressable Markdown blocks in MinerU reading order."""
         ignored_types = {"aside_text", "header", "footer", "page_number", "page_footnote"}
         blocks: list[dict] = []
-        for source_index, item in enumerate(self.content_list(id)):
+        for source_index, item in enumerate(self.content_list(id, user_id=user_id)):
             if not isinstance(item, dict) or item.get("type") in ignored_types:
                 continue
             content = self.content_list_markdown(item)
@@ -192,17 +192,17 @@ class PaperService:
             })
         return blocks
 
-    def markdown_block_indices(self, id: str) -> set[int]:
-        blocks = self.markdown_blocks(id)
+    def markdown_block_indices(self, id: str, user_id: str | None = None) -> set[int]:
+        blocks = self.markdown_blocks(id, user_id=user_id)
         if blocks:
             return {block["index"] for block in blocks}
-        content, _ = self.markdown(id)
+        content, _ = self.markdown(id, user_id=user_id)
         sections = [part.strip() for part in re.split(r"(?=^#{1,6}\s)", content, flags=re.MULTILINE) if part.strip()]
         return set(range(len(sections) or 1))
 
-    def translated_markdown_blocks(self, id: str, target_language: str) -> list[dict]:
-        translated, _ = self.translated_markdown(id, target_language)
-        metadata = {block["index"]: block for block in self.markdown_blocks(id)}
+    def translated_markdown_blocks(self, id: str, target_language: str, user_id: str | None = None) -> list[dict]:
+        translated, _ = self.translated_markdown(id, target_language, user_id=user_id)
+        metadata = {block["index"]: block for block in self.markdown_blocks(id, user_id=user_id)}
         pieces = re.split(r"^\s*<!-- mineru-block:(\d+) -->\s*$", translated, flags=re.MULTILINE)
         blocks: list[dict] = []
         for position in range(1, len(pieces), 2):
@@ -212,7 +212,7 @@ class PaperService:
                 blocks.append({**source, "content": content})
         return blocks
 
-    def layout_boxes(self, id: str) -> list[dict]:
+    def layout_boxes(self, id: str, user_id: str | None = None) -> list[dict]:
         """Return the same content-list bboxes used by the Markdown view."""
         return [{
             "id": block["id"],
@@ -225,7 +225,7 @@ class PaperService:
             "x1": block["bbox"][2],
             "y1": block["bbox"][3],
             "type": block["type"],
-        } for block in self.markdown_blocks(id)]
+        } for block in self.markdown_blocks(id, user_id=user_id)]
 
     @staticmethod
     def translation_language(target_language: str) -> dict:
@@ -241,7 +241,7 @@ class PaperService:
         stem = PurePosixPath(source_name).stem
         return f"translations/{stem}.{language['code']}.md"
 
-    def translated_markdown(self, id: str, target_language: str):
+    def translated_markdown(self, id: str, target_language: str, user_id: str | None = None):
         language = self.translation_language(target_language)
         from ..infrastructure.database import SessionLocal
         from ..infrastructure.orm_models import DocumentArtifactRecord
@@ -249,14 +249,14 @@ class PaperService:
         with SessionLocal() as s:
             artifact = s.scalar(select(DocumentArtifactRecord).where(DocumentArtifactRecord.document_id == id, DocumentArtifactRecord.kind == "translation", DocumentArtifactRecord.translation_language == language["code"]))
         if not artifact or artifact.kind != "translation": raise NotFoundError("Translation was not found.")
-        return R2ObjectStore().read(artifact.object_key).decode("utf-8"), artifact
+        return R2ObjectStore(user_id=user_id).read(artifact.object_key).decode("utf-8"), artifact
 
     @staticmethod
     def _fallback_search_blocks(content: str) -> list[dict]:
         sections = [part.strip() for part in re.split(r"(?=^#{1,6}\s)", content, flags=re.MULTILINE) if part.strip()]
         return [{"index": index, "content": section} for index, section in enumerate(sections or [content])]
 
-    def reindex_paper(self, id: str) -> None:
+    def reindex_paper(self, id: str, user_id: str | None = None) -> None:
         """Replace all searchable material for one paper atomically."""
         paper = self.papers.get(id)
         if not paper:
@@ -265,10 +265,10 @@ class PaperService:
         title = paper["title"]
         documents = [{"source": "paper", "title": title, "content": f"{title}\n{paper['url']}"}]
         if paper.get("isDecoded"):
-            source_blocks = self.markdown_blocks(id)
+            source_blocks = self.markdown_blocks(id, user_id=user_id)
             if not source_blocks:
                 try:
-                    markdown, _ = self.markdown(id)
+                    markdown, _ = self.markdown(id, user_id=user_id)
                     source_blocks = self._fallback_search_blocks(markdown)
                 except Exception:
                     source_blocks = []
@@ -285,8 +285,8 @@ class PaperService:
             for translation in paper.get("translations", []):
                 language = translation["targetLanguage"]
                 try:
-                    translated, _ = self.translated_markdown(id, language)
-                    blocks = self.translated_markdown_blocks(id, language) or self._fallback_search_blocks(translated)
+                    translated, _ = self.translated_markdown(id, language, user_id=user_id)
+                    blocks = self.translated_markdown_blocks(id, language, user_id=user_id) or self._fallback_search_blocks(translated)
                 except Exception:
                     continue
                 documents.extend({
@@ -313,8 +313,8 @@ class PaperService:
     async def translate_markdown(self, id: str, target_language: str, user_id: str | None = None):
         paper = self.paper(id)
         language = self.translation_language(target_language)
-        source, source_artifact = self.markdown(id)
-        canonical_blocks = self.markdown_blocks(id)
+        source, source_artifact = self.markdown(id, user_id=user_id)
+        canonical_blocks = self.markdown_blocks(id, user_id=user_id)
         if canonical_blocks:
             source = "\n\n".join(f"<!-- mineru-block:{block['index']} -->\n{block['content']}" for block in canonical_blocks)
         archive_path = self.translation_path(language["code"], source_artifact.archive_path)
@@ -328,12 +328,12 @@ class PaperService:
         if not translated.strip(): raise ValidationError("The translation model returned an empty document.")
         stored = R2ObjectStore(user_id=user_id).put(id, archive_path, translated.encode("utf-8"))
         self.papers.save_translation(id, stored, language["code"])
-        self.reindex_paper(id)
+        self.reindex_paper(id, user_id=user_id)
         return {"paperId": paper["id"], "targetLanguage": language["code"], "archivePath": archive_path, "content": translated}
 
     async def enqueue_translation(self, id: str, target_language: str, user_id: str | None = None):
         self.paper(id)
-        self.markdown(id)  # Fail fast when parsing has not completed.
+        self.markdown(id, user_id=user_id)  # Fail fast when parsing has not completed.
         language = self.translation_language(target_language)
         job, _ = self.papers.enqueue_translation(id, language["code"], self.now())
         self.schedule_translation(id, user_id=user_id)
@@ -367,7 +367,7 @@ class PaperService:
         user_msg = {"id": f"msg_{uuid4().hex[:8]}", "paperId": id, "role": "user", "content": message, "createdAt": self.now()}
         self.collaboration.add_message(user_msg, user_id=user_id)
         try:
-            markdown_content, _ = self.markdown(id)
+            markdown_content, _ = self.markdown(id, user_id=user_id)
         except Exception:
             markdown_content = ""
         system_prompt = (
@@ -398,7 +398,7 @@ class PaperService:
         user_msg = {"id": f"msg_{uuid4().hex[:8]}", "paperId": id, "role": "user", "content": message, "createdAt": self.now()}
         self.collaboration.add_message(user_msg, user_id=user_id)
         try:
-            markdown_content, _ = self.markdown(id)
+            markdown_content, _ = self.markdown(id, user_id=user_id)
         except Exception:
             markdown_content = ""
         system_prompt = (
@@ -442,7 +442,7 @@ class PaperService:
         target_lang = payload.get("targetLanguage", "Chinese (简体中文)")
         cfg = self.config.get_for_user(user_id, masked=False)
         try:
-            markdown_content, _ = self.markdown(id)
+            markdown_content, _ = self.markdown(id, user_id=user_id)
         except Exception:
             markdown_content = paper.get("title", "")
         if action_type in ("translate_full", "translate"):

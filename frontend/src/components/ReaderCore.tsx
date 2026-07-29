@@ -31,6 +31,15 @@ const REMARK_COLORS = [
   { value: '#e9d5ff', name: '紫色' },
 ];
 
+function isInteractiveTarget(target: EventTarget | null) {
+  return target instanceof HTMLElement && !!target.closest('a, button, input, textarea, select, [role="button"]');
+}
+
+function hasUserTextSelection() {
+  const selection = window.getSelection();
+  return !!selection && !selection.isCollapsed && selection.toString().trim().length > 0;
+}
+
 const DeferredMarkdown = memo(function DeferredMarkdown({ content, paperId }: { content: string; paperId: string }) {
   const targetRef = useRef<HTMLDivElement>(null);
   const [isNearViewport, setIsNearViewport] = useState(false);
@@ -80,7 +89,18 @@ const MarkdownBlockCard = memo(function MarkdownBlockCard({ block, paperId, rema
     setIsRemarkEditorOpen(false);
   }, [block.index, color, onAddRemark, remarkText]);
 
-  return <article onClick={() => onSelect(block)} onContextMenu={(event) => { event.preventDefault(); onContextMenu(block, event.clientX, event.clientY); }} className={`relative group cursor-pointer border-l-2 px-3 py-2 transition-colors ${selected ? 'border-black bg-white shadow-sm dark:border-slate-200 dark:bg-slate-800' : 'border-transparent hover:border-cyan-400 hover:bg-white/80 dark:hover:bg-slate-900/70'}`}>
+  return <article
+    onClick={(event) => {
+      if (isInteractiveTarget(event.target) || hasUserTextSelection()) return;
+      onSelect(block);
+    }}
+    onContextMenu={(event) => {
+      if (isInteractiveTarget(event.target) || hasUserTextSelection()) return;
+      event.preventDefault();
+      onContextMenu(block, event.clientX, event.clientY);
+    }}
+    className={`relative group border-l-2 px-3 py-2 transition-colors select-text ${selected ? 'border-black bg-white shadow-sm dark:border-slate-200 dark:bg-slate-800' : 'border-transparent hover:border-cyan-400 hover:bg-white/80 dark:hover:bg-slate-900/70'}`}
+  >
     <DeferredMarkdown content={block.content} paperId={paperId} />
     {remarks.map((remark) => <div key={remark.id} className="relative mt-3 flex justify-between rounded border border-l-4 p-2 text-xs" style={{ backgroundColor: `${remark.color}20`, borderColor: remark.color }}><span>{remark.comment}</span><button type="button" aria-label="删除备注" title="删除备注" onClick={(event) => { event.stopPropagation(); setRemarkPendingDelete(remark.id); }} className="ml-3 text-gray-500 hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-400"><Trash className="h-3 w-3" /></button>{remarkPendingDelete === remark.id && <ConfirmPopover title="删除备注？" description="删除后无法恢复。" onCancel={() => setRemarkPendingDelete(null)} onConfirm={() => { onDeleteRemark(remark.id); setRemarkPendingDelete(null); }} />}</div>)}
     <div className="absolute right-3 top-2 flex gap-1 rounded border bg-white px-2 py-1 opacity-0 shadow-sm group-hover:opacity-100 dark:bg-slate-800"><button type="button" onClick={(event) => { event.stopPropagation(); setIsRemarkEditorOpen((open) => !open); }} className="flex items-center gap-1 text-xs"><PenTool className="h-3 w-3" />Remark</button></div>
@@ -112,6 +132,7 @@ export default function ReaderCore({ paper, selectedBlock, onSelectBlock, remark
   const [pdfSourceBlocks, setPdfSourceBlocks] = useState<MarkdownBlock[]>([]);
   const [pdfChineseBlocks, setPdfChineseBlocks] = useState<MarkdownBlock[]>([]);
   const [pdfSelectedBox, setPdfSelectedBox] = useState<PdfBoundingBox | null>(null);
+  const [pdfActiveBoxId, setPdfActiveBoxId] = useState<string | null>(null);
   const [pdfScale, setPdfScale] = useState(1);
   const [mdScale, setMdScale] = useState(1);
   const [isPanning, setIsPanning] = useState(false);
@@ -248,6 +269,19 @@ export default function ReaderCore({ paper, selectedBlock, onSelectBlock, remark
   }, [pdfBoxes]);
   const pdfSourceBlocksByIndex = useMemo(() => new Map(pdfSourceBlocks.map((block) => [block.index, block])), [pdfSourceBlocks]);
   const pdfChineseBlocksByIndex = useMemo(() => new Map(pdfChineseBlocks.map((block) => [block.index, block])), [pdfChineseBlocks]);
+  const findPdfBoxAtPoint = useCallback((pageIndex: number, clientX: number, clientY: number) => {
+    const page = pageElementsRef.current.get(pageIndex);
+    if (!page) return null;
+    const rect = page.getBoundingClientRect();
+    if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return null;
+    const pageBoxes = pdfBoxesByPage.get(pageIndex) || [];
+    const normalizedX = ((clientX - rect.left) / rect.width) * 1000;
+    const normalizedY = ((clientY - rect.top) / rect.height) * 1000;
+    const hits = pageBoxes.filter((box) => normalizedX >= box.x0 && normalizedX <= box.x1 && normalizedY >= box.y0 && normalizedY <= box.y1);
+    if (!hits.length) return null;
+    hits.sort((a, b) => ((a.x1 - a.x0) * (a.y1 - a.y0)) - ((b.x1 - b.x0) * (b.y1 - b.y0)));
+    return hits[0];
+  }, [pdfBoxesByPage]);
 
   const changeMode = (nextMode: ReaderMode) => {
     setMode(nextMode);
@@ -315,6 +349,7 @@ export default function ReaderCore({ paper, selectedBlock, onSelectBlock, remark
     return clientY >= rect.top && clientY <= rect.bottom;
   });
   const startPan = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (mode !== 'pdf') return;
     if (event.button !== 0 || pdfPopoverRef.current?.contains(event.target as Node)) return;
     const target = event.target as HTMLElement;
     if (target.closest('button, input, textarea, a, select, [role="button"]')) return;
@@ -324,6 +359,7 @@ export default function ReaderCore({ paper, selectedBlock, onSelectBlock, remark
     setIsPanning(true);
   };
   const movePan = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (mode !== 'pdf') return;
     const pan = panRef.current;
     const container = readerScrollRef.current;
     if (!pan || !container || pan.pointerId !== event.pointerId) return;
@@ -339,6 +375,7 @@ export default function ReaderCore({ paper, selectedBlock, onSelectBlock, remark
     }
   };
   const finishPan = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (mode !== 'pdf') return;
     const pan = panRef.current;
     if (!pan || pan.pointerId !== event.pointerId) return;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
@@ -467,12 +504,34 @@ export default function ReaderCore({ paper, selectedBlock, onSelectBlock, remark
       onPointerUp={finishPan}
       onPointerCancel={finishPan}
       onClickCapture={(event) => { if (suppressClickRef.current) { event.preventDefault(); event.stopPropagation(); } }}
-      className={`flex-1 min-h-0 scroll-smooth px-6 py-8 overflow-auto select-none ${isPanning ? 'cursor-grabbing' : 'cursor-grab'}`}
+      className={`flex-1 min-h-0 scroll-smooth px-6 py-8 overflow-auto ${mode === 'pdf' ? 'select-none' : 'select-text'} ${mode === 'pdf' ? (isPanning ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-auto'}`}
     >
       {mode === 'pdf' ? <div className="min-h-full min-w-full w-max flex justify-center bg-slate-100 dark:bg-slate-950 py-6">{pdfUrl ? <Document file={pdfUrl} onLoadSuccess={({ numPages }) => setPages(numPages)}>{pages && Array.from({ length: pages }, (_, index) => {
         const selectedBlock = pdfSelectedBox?.pageIndex === index ? pdfSourceBlocksByIndex.get(pdfSelectedBox.blockIndex) : undefined;
         const chineseBlock = selectedBlock ? pdfChineseBlocksByIndex.get(selectedBlock.index) : undefined;
-        return <div key={index} ref={(element) => { if (element) pageElementsRef.current.set(index, element); else pageElementsRef.current.delete(index); }} className="relative mb-4 w-fit shadow-xl"><Page pageNumber={index + 1} width={Math.round(900 * pdfScale)} /><PdfBboxOverlay boxes={pdfBoxesByPage.get(index) || []} remarksByBlock={remarksByBlock} onSelectBox={selectPdfBox} onContextMenu={(box, x, y) => openJumpMenu(box.blockIndex, box.pageIndex, x, y)} />{selectedBlock && <PdfBlockPopover block={selectedBlock} box={pdfSelectedBox!} paperId={paper.id} chineseContent={chineseBlock?.content} popoverRef={pdfPopoverRef} remarks={remarksByBlock.get(selectedBlock.index) || []} onClose={() => setPdfSelectedBox(null)} onAddRemark={onAddRemark} onDeleteRemark={onDeleteRemark} />}</div>;
+        return <div
+          key={index}
+          ref={(element) => { if (element) pageElementsRef.current.set(index, element); else pageElementsRef.current.delete(index); }}
+          onPointerMove={(event) => {
+            const box = findPdfBoxAtPoint(index, event.clientX, event.clientY);
+            setPdfActiveBoxId(box?.id || null);
+          }}
+          onPointerLeave={() => setPdfActiveBoxId(null)}
+          onClick={(event) => {
+            if (suppressClickRef.current || isInteractiveTarget(event.target)) return;
+            const box = findPdfBoxAtPoint(index, event.clientX, event.clientY);
+            if (box) selectPdfBox(box);
+          }}
+          onContextMenu={(event) => {
+            if (isInteractiveTarget(event.target)) return;
+            const box = findPdfBoxAtPoint(index, event.clientX, event.clientY);
+            if (!box) return;
+            event.preventDefault();
+            event.stopPropagation();
+            openJumpMenu(box.blockIndex, box.pageIndex, event.clientX, event.clientY);
+          }}
+          className="relative mb-4 w-fit shadow-xl"
+        ><Page pageNumber={index + 1} width={Math.round(900 * pdfScale)} /><PdfBboxOverlay boxes={pdfBoxesByPage.get(index) || []} remarksByBlock={remarksByBlock} activeBoxId={pdfActiveBoxId} selectedBoxId={pdfSelectedBox?.id || null} />{selectedBlock && <PdfBlockPopover block={selectedBlock} box={pdfSelectedBox!} paperId={paper.id} chineseContent={chineseBlock?.content} popoverRef={pdfPopoverRef} remarks={remarksByBlock.get(selectedBlock.index) || []} onClose={() => setPdfSelectedBox(null)} onAddRemark={onAddRemark} onDeleteRemark={onDeleteRemark} />}</div>;
       })}</Document> : <span className="text-sm text-slate-500">Loading PDF…</span>}</div> :
         <div className="mx-auto max-w-3xl space-y-1 origin-top transition-transform duration-75" style={{ zoom: mdScale }}>
           {mode === 'translate' && <TranslationControls paper={paper} language={language} languages={translationLanguages} loading={loadingAction === 'translate_full'} onLanguageChange={setLanguage} onTranslate={onTranslate} />}
