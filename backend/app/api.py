@@ -135,8 +135,10 @@ def get_markdown(paper_id: str, target_language: str | None = Query(None, alias=
     return {"content": markdown, "blocks": papers.markdown_blocks(paper_id), "isTranslation": False}
 
 @router.post("/papers/{paper_id}/translations", status_code=202)
-async def translate_markdown(paper_id: str, payload: dict = Body(...)):
-    job = await papers.enqueue_translation(paper_id, payload.get("targetLanguage"))
+async def translate_markdown(request: Request, paper_id: str, payload: dict = Body(...), zhidao_session: str | None = Cookie(None)):
+    user = get_current_user_from_req(request, zhidao_session)
+    user_id = user["id"] if user else None
+    job = await papers.enqueue_translation(paper_id, payload.get("targetLanguage"), user_id=user_id)
     return {"success": True, "translationJob": job}
 
 @router.get("/papers/{paper_id}")

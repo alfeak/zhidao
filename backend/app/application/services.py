@@ -310,7 +310,7 @@ class PaperService:
     def search(self, query: str, limit: int = 30) -> list[dict]:
         return self.search_index.search(query, limit)
 
-    async def translate_markdown(self, id: str, target_language: str):
+    async def translate_markdown(self, id: str, target_language: str, user_id: str | None = None):
         paper = self.paper(id)
         language = self.translation_language(target_language)
         source, source_artifact = self.markdown(id)
@@ -318,7 +318,7 @@ class PaperService:
         if canonical_blocks:
             source = "\n\n".join(f"<!-- mineru-block:{block['index']} -->\n{block['content']}" for block in canonical_blocks)
         archive_path = self.translation_path(language["code"], source_artifact.archive_path)
-        cfg = self.config.get(masked=False)
+        cfg = self.config.get_for_user(user_id, masked=False)
         instruction = "You translate academic Markdown. Return only translated Markdown. Translate prose only; preserve every Markdown construct, headings, lists, tables, links, URLs, image paths, HTML, code fences, inline code, LaTex/math, citations, and whitespace/layout. Do not add or remove sections. HTML comments in the form <!-- mineru-block:N --> are structural block markers: preserve each one exactly, in the same order."
         translated = await self.llm.generate(
             cfg,
@@ -326,33 +326,31 @@ class PaperService:
             system_instruction=instruction,
         )
         if not translated.strip(): raise ValidationError("The translation model returned an empty document.")
-        stored = R2ObjectStore().put(id, archive_path, translated.encode("utf-8"))
+        stored = R2ObjectStore(user_id=user_id).put(id, archive_path, translated.encode("utf-8"))
         self.papers.save_translation(id, stored, language["code"])
         self.reindex_paper(id)
         return {"paperId": paper["id"], "targetLanguage": language["code"], "archivePath": archive_path, "content": translated}
 
-    async def enqueue_translation(self, id: str, target_language: str):
+    async def enqueue_translation(self, id: str, target_language: str, user_id: str | None = None):
         self.paper(id)
         self.markdown(id)  # Fail fast when parsing has not completed.
         language = self.translation_language(target_language)
         job, _ = self.papers.enqueue_translation(id, language["code"], self.now())
-        # Scheduling is idempotent. Re-attempt it for an existing pending job so
-        # a request can recover from an unexpected in-process task loss.
-        self.schedule_translation(id)
+        self.schedule_translation(id, user_id=user_id)
         return job
 
-    def schedule_translation(self, id: str):
+    def schedule_translation(self, id: str, user_id: str | None = None):
         current = self._translation_tasks.get(id)
         if current and not current.done(): return
-        task = asyncio.create_task(self.run_translation_job(id), name=f"translation:{id}")
+        task = asyncio.create_task(self.run_translation_job(id, user_id=user_id), name=f"translation:{id}")
         self._translation_tasks[id] = task
         task.add_done_callback(lambda _: self._translation_tasks.pop(id, None))
 
-    async def run_translation_job(self, id: str):
+    async def run_translation_job(self, id: str, user_id: str | None = None):
         job = self.papers.claim_translation(id, self.now())
         if not job: return
         try:
-            await self.translate_markdown(id, job["targetLanguage"])
+            await self.translate_markdown(id, job["targetLanguage"], user_id=user_id)
         except Exception as error:
             self.papers.finish_translation(id, "failed", str(error), self.now())
         else:
@@ -361,6 +359,7 @@ class PaperService:
     async def recover_translation_jobs(self):
         for id in self.papers.resume_translation_jobs(self.now()):
             self.schedule_translation(id)
+
     async def chat(self, id: str, message: str, user_id: str | None = None):
         paper = self.papers.get(id)
         if not paper: raise NotFoundError("Paper not found")
@@ -400,12 +399,12 @@ class PaperService:
             except Exception:
                 pass
 
-    async def action(self, id: str, payload: dict):
+    async def action(self, id: str, payload: dict, user_id: str | None = None):
         paper = self.papers.get(id)
         if not paper: raise NotFoundError("Paper not found")
         action_type = payload.get("action")
         target_lang = payload.get("targetLanguage", "Chinese (简体中文)")
-        cfg = self.config.get(masked=False)
+        cfg = self.config.get_for_user(user_id, masked=False)
         try:
             markdown_content, _ = self.markdown(id)
         except Exception:

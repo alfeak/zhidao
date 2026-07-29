@@ -301,6 +301,17 @@ class ConfigRepository:
         masked_llm_configs = [{**c, "llmApiKey": mask_val(c.get("llmApiKey", ""))} for c in llm_configs]
         masked_r2_configs = [{**c, "r2SecretAccessKey": mask_val(c.get("r2SecretAccessKey", ""))} for c in r2_configs]
 
+        models_list = [{
+            "id": c.get("id", "llm"),
+            "name": c.get("llmModel") or "deepseek-v4-pro",
+            "apiKey": mask_val(c.get("llmApiKey", "")) if masked else c.get("llmApiKey", ""),
+            "baseUrl": c.get("llmBaseUrl") or "https://api.deepseek.com",
+            "isPrimary": bool(c.get("isPrimary")),
+        } for c in llm_configs]
+
+        if models_list and not any(m.get("isPrimary") for m in models_list):
+            models_list[0]["isPrimary"] = True
+
         return {
             "mineruConfigs": masked_mineru_configs,
             "llmConfigs": masked_llm_configs,
@@ -316,13 +327,7 @@ class ConfigRepository:
             "r2SecretAccessKey": mask_val(r2_secret_access_key),
             "r2EndpointUrl": r2_endpoint_url,
             "r2Prefix": r2_prefix,
-            "models": [{
-                "id": "model_primary",
-                "name": model_name,
-                "apiKey": mask_val(api_key),
-                "baseUrl": base_url,
-                "isPrimary": True,
-            }]
+            "models": models_list,
         }
 
     def update_for_user(self, user_id: str | None, payload: dict):
