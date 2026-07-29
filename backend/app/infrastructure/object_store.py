@@ -19,13 +19,18 @@ class StoredObject:
     sha256: str
 
 class R2ObjectStore:
-    def __init__(self):
-        account_id = os.getenv("R2_ACCOUNT_ID", "").strip()
-        self.bucket = os.getenv("R2_BUCKET", "").strip()
-        self.prefix = os.getenv("R2_PREFIX", "mineru").strip("/")
-        access_key = os.getenv("R2_ACCESS_KEY_ID", "").strip()
-        secret_key = os.getenv("R2_SECRET_ACCESS_KEY", "").strip()
-        endpoint = os.getenv("R2_ENDPOINT_URL", "").strip() or (f"https://{account_id}.r2.cloudflarestorage.com" if account_id else "")
+    def __init__(self, user_id: str | None = None, settings: dict | None = None):
+        if user_id and not settings:
+            from .repositories import UserSettingsRepository
+            settings = UserSettingsRepository.get_user_settings(user_id)
+        settings = settings or {}
+
+        account_id = settings.get("r2AccountId") or os.getenv("R2_ACCOUNT_ID", "").strip()
+        self.bucket = settings.get("r2Bucket") or os.getenv("R2_BUCKET", "").strip()
+        self.prefix = (settings.get("r2Prefix") or os.getenv("R2_PREFIX", "mineru")).strip("/")
+        access_key = settings.get("r2AccessKeyId") or os.getenv("R2_ACCESS_KEY_ID", "").strip()
+        secret_key = settings.get("r2SecretAccessKey") or os.getenv("R2_SECRET_ACCESS_KEY", "").strip()
+        endpoint = settings.get("r2EndpointUrl") or os.getenv("R2_ENDPOINT_URL", "").strip() or (f"https://{account_id}.r2.cloudflarestorage.com" if account_id else "")
         if not all((self.bucket, access_key, secret_key, endpoint)):
             raise ObjectStoreError("R2_BUCKET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY and R2_ENDPOINT_URL (or R2_ACCOUNT_ID) are required.")
         self.client = boto3.client("s3", endpoint_url=endpoint, aws_access_key_id=access_key, aws_secret_access_key=secret_key, region_name="auto", config=Config(signature_version="s3v4"))
@@ -71,4 +76,4 @@ class R2ObjectStore:
         paginator = self.client.get_paginator("list_objects_v2")
         for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
             entries = [{"Key": item["Key"]} for item in page.get("Contents", [])]
-            if entries: self.client.delete_objects(Bucket=self.bucket, Delete={"Objects": entries, "Quiet": True})
+            if entries: self.client.delete_objects(Bucket=self.bucket, Delete={"Objects": entries, "Quiet": True})

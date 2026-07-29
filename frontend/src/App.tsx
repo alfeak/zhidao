@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ChevronLeft, ChevronRight, Moon, Sun } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Moon, Settings, Sun } from 'lucide-react';
 import { HighlightRemark, MarkdownBlock, TranslationLanguage } from './types';
 import ImportModule from './components/ImportModule';
 import PaperList from './components/PaperList';
 import ReaderCore from './components/ReaderCore';
 import LandingPage from './components/LandingPage';
 import UserMenu from './components/UserMenu';
+import SettingsModal from './components/SettingsModal';
 import { usePaperWorkspace } from './hooks/usePaperWorkspace';
 import { useAuth } from './hooks/useAuth';
 
@@ -31,6 +32,7 @@ export default function App() {
   const [translationLanguages, setTranslationLanguages] = useState<TranslationLanguage[]>([]);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [isLeftSidebarOpen, setIsLeftSidebarOpen] = useState(true);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => (
     localStorage.getItem('zhidao-theme') as 'light' | 'dark'
   ) || 'light');
@@ -141,13 +143,18 @@ export default function App() {
           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-slate-800 dark:bg-slate-200" />
           {time || '00:00:00'}
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <UserMenu user={user} onLogout={logout} />
           <button onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')} className="flex items-center justify-center rounded-md bg-gray-100 p-1.5 text-gray-700 transition-colors hover:bg-gray-200 dark:bg-slate-800 dark:text-gray-300 dark:hover:bg-slate-700" title="切换主题">
             {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4 text-amber-400" />}
           </button>
+          <button onClick={() => setIsSettingsOpen(true)} className="flex items-center justify-center rounded-md bg-gray-100 p-1.5 text-gray-700 transition-colors hover:bg-gray-200 dark:bg-slate-800 dark:text-gray-300 dark:hover:bg-slate-700" title="系统与偏好设置">
+            <Settings className="h-4 w-4 text-slate-600 dark:text-slate-300" />
+          </button>
         </div>
       </header>
+
+      <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
 
       <div className="relative flex min-h-0 flex-1">
         <aside className="flex min-h-0 shrink-0 flex-col overflow-hidden border-r border-gray-200 bg-white transition-all duration-300 dark:border-slate-800 dark:bg-slate-900" style={{ width: isLeftSidebarOpen ? '320px' : '0px' }}>

@@ -1,3 +1,4 @@
+import os
 from fastapi import APIRouter, BackgroundTasks, Body, HTTPException, Query, Request, Response, Cookie
 from .application.services import PaperService
 from .application.auth_service import AuthService
@@ -18,6 +19,10 @@ def extract_session_id(request: Request, cookie_session: str | None = None) -> s
     if auth_header.startswith("Bearer "):
         return auth_header[7:].strip()
     return None
+
+def get_current_user_from_req(request: Request, zhidao_session: str | None = None) -> dict | None:
+    session_id = extract_session_id(request, zhidao_session)
+    return auth_service.get_user_by_session(session_id) if session_id else None
 
 @router.get("/auth/config")
 def get_auth_config():
@@ -45,8 +50,7 @@ async def google_login(response: Response, payload: dict = Body(...)):
 
 @router.get("/auth/me")
 def get_current_user(request: Request, zhidao_session: str | None = Cookie(None)):
-    session_id = extract_session_id(request, zhidao_session)
-    user = auth_service.get_user_by_session(session_id) if session_id else None
+    user = get_current_user_from_req(request, zhidao_session)
     return {"user": user}
 
 @router.post("/auth/logout")
@@ -61,7 +65,10 @@ def require(value, name):
     if not value: raise ValidationError(f"{name} is required")
 
 @router.get("/config")
-def get_config(): return config.get(masked=True)
+def get_config(request: Request, zhidao_session: str | None = Cookie(None)):
+    user = get_current_user_from_req(request, zhidao_session)
+    user_id = user["id"] if user else None
+    return config.get_for_user(user_id, masked=True)
 
 @router.get("/translation-languages")
 def get_translation_languages(): return {"languages": TRANSLATION_LANGUAGES}
@@ -71,19 +78,27 @@ def search_papers(q: str = Query(..., min_length=1), limit: int = Query(30, ge=1
     return {"results": papers.search(q, limit)}
 
 @router.post("/config")
-def update_config(payload: dict = Body(...)):
-    return {"success": True, "config": config.update(payload)}
+def update_config(request: Request, payload: dict = Body(...), zhidao_session: str | None = Cookie(None)):
+    user = get_current_user_from_req(request, zhidao_session)
+    user_id = user["id"] if user else None
+    return {"success": True, "config": config.update_for_user(user_id, payload)}
 
 @router.post("/config/test-model")
-async def test_model(payload: dict = Body(...)):
-    model_id = payload.get("modelId")
-    stored = config.get(masked=False)["models"]
-    if model_id:
-        model = next((item for item in stored if item["id"] == model_id), None)
-        if not model: raise NotFoundError("Model not found for testing.")
-    else:
-        model = {"id": "test", "name": payload.get("name", ""), "apiKey": payload.get("apiKey", ""), "baseUrl": payload.get("baseUrl", ""), "isPrimary": True}
-    if not model["apiKey"] or str(model["apiKey"]).startswith("•••"): raise ValidationError("API Key is required to perform testing.")
+async def test_model(request: Request, payload: dict = Body(...), zhidao_session: str | None = Cookie(None)):
+    user = get_current_user_from_req(request, zhidao_session)
+    user_id = user["id"] if user else None
+    user_cfg = config.get_for_user(user_id, masked=False)
+    
+    api_key = payload.get("apiKey") or payload.get("llmApiKey")
+    if not api_key or str(api_key).startswith("•••"):
+        api_key = user_cfg.get("llmApiKey") or os.getenv("DEEPSEEK_API_KEY", "").strip()
+    model_name = payload.get("name") or payload.get("model") or payload.get("llmModel") or user_cfg.get("llmModel") or "deepseek-v4-pro"
+    base_url = payload.get("baseUrl") or payload.get("llmBaseUrl") or user_cfg.get("llmBaseUrl") or "https://api.deepseek.com"
+
+    if not api_key:
+        raise ValidationError("API Key is required to perform testing.")
+
+    model = {"id": "test", "name": model_name, "apiKey": api_key, "baseUrl": base_url, "isPrimary": True}
     result = await papers.llm.generate({"models": [model]}, "Reply with a short successful connection message.")
     return {"success": True, "message": result}
 
@@ -130,10 +145,12 @@ def get_paper(paper_id: str): return papers.paper(paper_id)
 def list_papers(): return papers.list_papers()
 
 @router.post("/papers/import")
-async def import_paper(payload: dict, background_tasks: BackgroundTasks):
+async def import_paper(request: Request, payload: dict, background_tasks: BackgroundTasks, zhidao_session: str | None = Cookie(None)):
+    user = get_current_user_from_req(request, zhidao_session)
+    user_id = user["id"] if user else None
     paper = await papers.import_paper(payload.get("url"), payload.get("title"))
     if not paper.get("isDecoded"):
-        background_tasks.add_task(papers.decode, paper["id"])
+        background_tasks.add_task(papers.decode, paper["id"], user_id)
     return {"success": True, "paper": paper}
 
 @router.delete("/papers/{paper_id}")
@@ -141,29 +158,36 @@ def delete_paper(paper_id: str):
     papers.delete_paper(paper_id); return {"success": True}
 
 @router.post("/papers/{paper_id}/decode")
-def decode_paper(paper_id: str, background_tasks: BackgroundTasks):
+def decode_paper(request: Request, paper_id: str, background_tasks: BackgroundTasks, zhidao_session: str | None = Cookie(None)):
+    user = get_current_user_from_req(request, zhidao_session)
+    user_id = user["id"] if user else None
     paper = papers.start_decoding(paper_id)
-    background_tasks.add_task(papers.decode, paper_id)
+    background_tasks.add_task(papers.decode, paper_id, user_id)
     return {"success": True, "paper": paper}
 
 @router.get("/papers/{paper_id}/chat")
-def get_chat(paper_id: str): return papers.collaboration.messages(paper_id)
+def get_chat(request: Request, paper_id: str, zhidao_session: str | None = Cookie(None)):
+    user = get_current_user_from_req(request, zhidao_session)
+    user_id = user["id"] if user else None
+    return papers.collaboration.messages(paper_id, user_id=user_id)
 
 @router.post("/papers/{paper_id}/chat/clear")
-def clear_chat(paper_id: str):
-    papers.collaboration.clear_messages(paper_id); return {"success": True}
-
-@router.post("/papers/{paper_id}/chat")
-async def send_chat(paper_id: str, payload: dict): return await papers.chat(paper_id, payload.get("message"))
-
-@router.post("/papers/{paper_id}/action")
-async def paper_action(paper_id: str, payload: dict): return await papers.action(paper_id, payload)
+def clear_chat(request: Request, paper_id: str, zhidao_session: str | None = Cookie(None)):
+    user = get_current_user_from_req(request, zhidao_session)
+    user_id = user["id"] if user else None
+    papers.collaboration.clear_messages(paper_id, user_id=user_id)
+    return {"success": True}
 
 @router.get("/papers/{paper_id}/remarks")
-def get_remarks(paper_id: str): return papers.collaboration.remarks(paper_id)
+def get_remarks(request: Request, paper_id: str, zhidao_session: str | None = Cookie(None)):
+    user = get_current_user_from_req(request, zhidao_session)
+    user_id = user["id"] if user else None
+    return papers.collaboration.remarks(paper_id, user_id=user_id)
 
 @router.post("/remarks")
-def add_remark(payload: dict):
+def add_remark(request: Request, payload: dict, zhidao_session: str | None = Cookie(None)):
+    user = get_current_user_from_req(request, zhidao_session)
+    user_id = user["id"] if user else None
     require(payload.get("paperId"), "paperId")
     require(payload.get("comment"), "comment")
     block_index = payload.get("blockIndex")
@@ -182,14 +206,15 @@ def add_remark(payload: dict):
         "color": payload.get("color") or "#fef08a",
         "createdAt": papers.now(),
     }
-    saved = papers.collaboration.add_remark(remark)
+    saved = papers.collaboration.add_remark(remark, user_id=user_id)
     if not saved:
         raise NotFoundError("Paper not found")
     return saved
 
 @router.delete("/remarks/{remark_id}")
-def delete_remark(remark_id: str):
-    if not papers.collaboration.delete_remark(remark_id):
+def delete_remark(request: Request, remark_id: str, zhidao_session: str | None = Cookie(None)):
+    user = get_current_user_from_req(request, zhidao_session)
+    user_id = user["id"] if user else None
+    if not papers.collaboration.delete_remark(remark_id, user_id=user_id):
         raise NotFoundError("Remark not found")
     return {"success": True}
-

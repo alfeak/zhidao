@@ -80,15 +80,16 @@ class PaperService:
         if not self.papers.get(id): raise NotFoundError("Paper not found")
         self.papers.set_status(id, "pending"); return self.papers.get(id)
 
-    async def decode(self, id):
+    async def decode(self, id, user_id=None):
         paper = self.papers.get(id)
         if not paper: return
         if paper.get("isDecoded"): return
         self.papers.set_status(id, "processing")
         try:
+            r2 = R2ObjectStore(user_id=user_id)
             # Check R2 cache first before invoking MinerU API
             try:
-                cached_artifacts = R2ObjectStore().list_cached_artifacts(id)
+                cached_artifacts = r2.list_cached_artifacts(id)
             except Exception:
                 cached_artifacts = []
             if any(a.archive_path.endswith(".md") and not a.archive_path.startswith("translations/") for a in cached_artifacts):
@@ -96,8 +97,9 @@ class PaperService:
                 self.reindex_paper(id)
                 return
 
-            result = await self.mineru.parse_url(paper["url"])
-            self.papers.save_artifacts(id, R2ObjectStore().put_archive(id, result.files))
+            mineru_client = MinerUClient(user_id=user_id)
+            result = await mineru_client.parse_url(paper["url"])
+            self.papers.save_artifacts(id, r2.put_archive(id, result.files))
             self.reindex_paper(id)
         except Exception as e:
             self.papers.set_status(id, "failed", str(e))

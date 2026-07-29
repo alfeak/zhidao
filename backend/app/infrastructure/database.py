@@ -25,6 +25,12 @@ def initialize_database():
     if "block_index" not in {column["name"] for column in inspect(engine).get_columns("remarks")}:
         with engine.begin() as conn:
             conn.exec_driver_sql("ALTER TABLE remarks ADD COLUMN block_index INTEGER")
+    if "user_id" not in {column["name"] for column in inspect(engine).get_columns("remarks")}:
+        with engine.begin() as conn:
+            conn.exec_driver_sql("ALTER TABLE remarks ADD COLUMN user_id VARCHAR")
+    if "user_id" not in {column["name"] for column in inspect(engine).get_columns("chat_messages")}:
+        with engine.begin() as conn:
+            conn.exec_driver_sql("ALTER TABLE chat_messages ADD COLUMN user_id VARCHAR")
     with SessionLocal.begin() as s:
         s.merge(SchemaMetadataRecord(key="schema_version", value="2"))
         if s.scalar(select(ModelRecord.id).limit(1)) is None:

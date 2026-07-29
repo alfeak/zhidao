@@ -18,9 +18,14 @@ class MinerUResult:
     version: str | None = None
 
 class MinerUClient:
-    def __init__(self, token: str | None = None):
+    def __init__(self, token: str | None = None, base_url: str | None = None, user_id: str | None = None):
+        if user_id and (not token or not base_url):
+            from .repositories import UserSettingsRepository
+            s = UserSettingsRepository.get_user_settings(user_id)
+            if not token: token = s.get("mineruToken")
+            if not base_url: base_url = s.get("mineruBaseUrl")
         self.token = token
-        self.base_url = os.getenv("MINERU_API_BASE_URL", "https://mineru.net/api/v4").rstrip("/")
+        self.base_url = (base_url or os.getenv("MINERU_API_BASE_URL", "https://mineru.net/api/v4")).rstrip("/")
 
     async def parse_url(self, source_url: str) -> MinerUResult:
         token = self.token or os.getenv("MINERU_API_TOKEN", "").strip()
@@ -57,7 +62,7 @@ class MinerUClient:
     def extract_archive(payload: bytes) -> MinerUResult:
         with zipfile.ZipFile(BytesIO(payload)) as archive:
             names = [name for name in archive.namelist() if not name.endswith("/")]
-            safe = [name for name in names if not PurePosixPath(name).is_absolute() and ".." not in PurePosixPath(name).parts]
+            safe = [name for name in safe if not PurePosixPath(name).is_absolute() and ".." not in PurePosixPath(name).parts]
             markdown = sorted((name for name in safe if name.lower().endswith(".md")), key=lambda n: ("full.md" not in n.lower(), len(n)))
             pdf = [name for name in safe if name.lower().endswith(".pdf") and not PurePosixPath(name).stem.lower().endswith(("_layout", "_span"))]
             if not markdown: raise MinerUError("MinerU ZIP does not contain a Markdown file.")

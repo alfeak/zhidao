@@ -64,6 +64,7 @@ class ChatMessageRecord(Base):
     __tablename__ = "chat_messages"
     id: Mapped[str] = mapped_column(String, primary_key=True)
     document_id: Mapped[str] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
     role: Mapped[str] = mapped_column(String, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
@@ -73,6 +74,7 @@ class RemarkRecord(Base):
     __tablename__ = "remarks"
     id: Mapped[str] = mapped_column(String, primary_key=True)
     document_id: Mapped[str] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
     # Canonical position in the source Markdown. It is language-independent,
     # so the same remark can be rendered in original and translated views.
     block_index: Mapped[int | None] = mapped_column(Integer, index=True)
@@ -93,6 +95,7 @@ class UserRecord(Base):
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     last_login_at: Mapped[str] = mapped_column(String, nullable=False)
     sessions: Mapped[list["UserSessionRecord"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    settings: Mapped["UserSettingsRecord | None"] = relationship(back_populates="user", cascade="all, delete-orphan", uselist=False)
 
 class UserSessionRecord(Base):
     __tablename__ = "user_sessions"
@@ -100,3 +103,20 @@ class UserSessionRecord(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     expires_at: Mapped[str] = mapped_column(String, nullable=False)
     user: Mapped[UserRecord] = relationship(back_populates="sessions")
+
+class UserSettingsRecord(Base):
+    __tablename__ = "user_settings"
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    mineru_token: Mapped[str | None] = mapped_column(Text)
+    mineru_base_url: Mapped[str | None] = mapped_column(Text)
+    llm_model: Mapped[str | None] = mapped_column(Text)
+    llm_api_key: Mapped[str | None] = mapped_column(Text)
+    llm_base_url: Mapped[str | None] = mapped_column(Text)
+    r2_account_id: Mapped[str | None] = mapped_column(Text)
+    r2_bucket: Mapped[str | None] = mapped_column(Text)
+    r2_access_key_id: Mapped[str | None] = mapped_column(Text)
+    r2_secret_access_key: Mapped[str | None] = mapped_column(Text)
+    r2_endpoint_url: Mapped[str | None] = mapped_column(Text)
+    r2_prefix: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+    user: Mapped[UserRecord] = relationship(back_populates="settings")
