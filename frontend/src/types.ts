@@ -8,7 +8,21 @@ export interface MarkdownBlock {
   index: number;
   content: string;
   pageIndex?: number;
-  bbox?: string; // Coordinates or position text representation
+  bbox?: [number, number, number, number];
+  type?: string;
+}
+
+export interface PdfBoundingBox {
+  id: string;
+  blockIndex: number;
+  pageIndex: number;
+  pageWidth: number;
+  pageHeight: number;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  type: string;
 }
 
 export interface Paper {
@@ -20,6 +34,25 @@ export interface Paper {
   decodeError?: string;
   mdBlocks?: MarkdownBlock[];
   importedAt: string;
+  translations?: Array<{ targetLanguage: string; archivePath: string }>;
+  translationJob?: {
+    targetLanguage: string;
+    status: 'pending' | 'processing' | 'done' | 'failed';
+    error?: string | null;
+    createdAt: string;
+    updatedAt: string;
+  };
+}
+
+export interface TranslationLanguage {
+  code: string;
+  name: string;
+}
+
+export interface PaperSearchResult {
+  paperId: string;
+  title: string;
+  sources: Array<{ source: 'paper' | 'pdf' | 'markdown' | 'translate'; language?: string | null }>;
 }
 
 export interface ChatMessage {
@@ -33,7 +66,7 @@ export interface ChatMessage {
 export interface HighlightRemark {
   id: string;
   paperId: string;
-  blockId: string; // Refers to MarkdownBlock.id
+  blockIndex: number; // Canonical source Markdown block index, shared by translations.
   comment: string;
   color: string; // CSS color or Tailwind class
   createdAt: string;

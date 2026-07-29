@@ -3,9 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Search, FileText, Trash2, RefreshCw, AlertCircle, Clock, Loader2, CheckCircle2 } from 'lucide-react';
-import { Paper } from '../types';
+import { Paper, PaperSearchResult } from '../types';
+import ConfirmPopover from './ConfirmPopover';
 
 interface PaperListProps {
   papers: Paper[];
@@ -23,11 +24,42 @@ export default function PaperList({
   onRetryDecode,
 }: PaperListProps) {
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<PaperSearchResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [paperPendingDelete, setPaperPendingDelete] = useState<Paper | null>(null);
 
   const filteredPapers = papers.filter((paper) =>
     paper.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
     paper.url.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  useEffect(() => {
+    const query = searchQuery.trim();
+    if (!query) { setSearchResults([]); setIsSearching(false); return; }
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setIsSearching(true);
+      fetch(`/api/search?q=${encodeURIComponent(query)}`, { signal: controller.signal })
+        .then(async (response) => {
+          if (!response.ok) throw new Error(`Search returned ${response.status}`);
+          return response.json() as Promise<{ results: PaperSearchResult[] }>;
+        })
+        .then((data) => { if (!controller.signal.aborted) setSearchResults(data.results); })
+        .catch(() => { if (!controller.signal.aborted) setSearchResults([]); })
+        .finally(() => { if (!controller.signal.aborted) setIsSearching(false); });
+    }, 180);
+    return () => { controller.abort(); window.clearTimeout(timer); };
+  }, [searchQuery]);
+
+  const sourceLabel = (result: PaperSearchResult) => {
+    const labels = result.sources.map((item) => {
+      if (item.source === 'pdf') return 'PDF';
+      if (item.source === 'markdown') return 'Markdown';
+      if (item.source === 'translate') return `翻译 ${item.language || ''}`;
+      return '论文信息';
+    });
+    return [...new Set(labels)].join(' · ');
+  };
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-gray-50/50 dark:bg-slate-950/40 font-sans transition-colors duration-300">
@@ -47,7 +79,18 @@ export default function PaperList({
 
       {/* Papers Scroller */}
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
-        {filteredPapers.length === 0 ? (
+        {searchQuery.trim() ? <>
+          {isSearching && <p className="px-1 py-2 text-xs text-gray-400">搜索中…</p>}
+          {!isSearching && searchResults.length === 0 && <div className="flex flex-col items-center justify-center py-12 text-gray-400 dark:text-slate-500 px-4"><Search className="mb-2 h-8 w-8 stroke-1 text-gray-300 dark:text-slate-700" /><p className="text-xs text-center">未找到正文匹配内容</p></div>}
+          {searchResults.map((result) => {
+            const paper = papers.find((item) => item.id === result.paperId);
+            if (!paper) return null;
+            return <button key={result.paperId} type="button" onClick={() => onSelectPaper(paper)} className={`block w-full rounded border p-3 text-left transition-colors ${activePaper?.id === result.paperId ? 'border-slate-900 bg-white dark:border-slate-100 dark:bg-slate-800' : 'border-gray-200 bg-white hover:bg-gray-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800'}`}>
+              <div className="flex items-center justify-between gap-2"><span className="line-clamp-1 text-xs font-semibold text-gray-800 dark:text-slate-100">{result.title}</span><span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[9px] text-slate-500 dark:bg-slate-800 dark:text-slate-400">{sourceLabel(result)}</span></div>
+              <p className="mt-1.5 text-[11px] leading-5 text-gray-500 dark:text-slate-400">全文材料命中</p>
+            </button>;
+          })}
+        </> : filteredPapers.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-gray-400 dark:text-slate-500 px-4">
             <FileText className="w-8 h-8 stroke-1 mb-2 text-gray-300 dark:text-slate-700" />
             <p className="text-xs text-center">
@@ -127,13 +170,24 @@ export default function PaperList({
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      onDeletePaper(paper.id);
+                      setPaperPendingDelete(paper);
                     }}
                     title="删除论文"
                     className="p-1 text-gray-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded transition-colors cursor-pointer"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
+                  {paperPendingDelete?.id === paper.id && (
+                    <ConfirmPopover
+                      title="删除论文？"
+                      description="备注和翻译任务记录也会被删除。原始解析文件会保留以便再次导入。"
+                      onCancel={() => setPaperPendingDelete(null)}
+                      onConfirm={() => {
+                        onDeletePaper(paper.id);
+                        setPaperPendingDelete(null);
+                      }}
+                    />
+                  )}
                 </div>
               </div>
             );

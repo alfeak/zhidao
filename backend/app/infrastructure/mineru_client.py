@@ -27,12 +27,21 @@ class MinerUClient:
         if not token: raise MinerUError("MINERU_API_TOKEN is not configured.")
         headers = {"Authorization": f"Bearer {token}"}
         async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
-            response = await client.post(f"{self.base_url}/extract/task", headers={**headers, "Content-Type": "application/json"}, json={"url": source_url, "model_version": "vlm"})
-            response.raise_for_status()
+            try:
+                response = await client.post(f"{self.base_url}/extract/task", headers={**headers, "Content-Type": "application/json"}, json={"url": source_url, "model_version": "vlm"})
+                response.raise_for_status()
+            except httpx.HTTPStatusError as err:
+                if err.response.status_code == 401:
+                    raise MinerUError("MinerU Token 鉴权失败 (401 Unauthorized)，当前 Token 无效或已被撤销。请前往 https://mineru.net/apiManage/token 重新申请 Token。")
+                raise MinerUError(f"MinerU API 请求失败 ({err.response.status_code}): {err.response.text}")
             body = response.json()
             if body.get("code") != 0: raise MinerUError(body.get("msg", "Unable to create MinerU task."))
             zip_url = await self._wait_for_result(client, headers, body["data"]["task_id"])
-            archive = await client.get(zip_url); archive.raise_for_status()
+            try:
+                archive = await client.get(zip_url)
+                archive.raise_for_status()
+            except httpx.HTTPStatusError as err:
+                raise MinerUError(f"下载 MinerU 解析结果包失败 ({err.response.status_code})")
         return self.extract_archive(archive.content)
 
     async def _wait_for_result(self, client, headers, task_id):
