@@ -8,11 +8,13 @@ export interface MarkdownBlock {
   index: number;
   content: string;
   pageIndex?: number;
-  bbox?: string; // Coordinates or position text representation
+  bbox?: [number, number, number, number];
+  type?: string;
 }
 
 export interface PdfBoundingBox {
   id: string;
+  blockIndex: number;
   pageIndex: number;
   pageWidth: number;
   pageHeight: number;

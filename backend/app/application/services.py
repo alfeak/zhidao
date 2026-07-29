@@ -112,14 +112,8 @@ class PaperService:
         artifact = self.markdown_artifact(id)
         return R2ObjectStore().read(artifact.object_key).decode("utf-8"), artifact
 
-    def markdown_block_count(self, id: str) -> int:
-        """Return the canonical block count used by both original and translated views."""
-        content, _ = self.markdown(id)
-        blocks = [part.strip() for part in re.split(r"(?=^#{1,6}\s)", content, flags=re.MULTILINE) if part.strip()]
-        return len(blocks) or 1
-
-    def layout_boxes(self, id: str) -> list[dict]:
-        """Return MinerU layout boxes in their original page coordinate space."""
+    def content_list(self, id: str) -> list[dict]:
+        """Read MinerU's reading-order content list, the canonical bbox source."""
         from ..infrastructure.database import SessionLocal
         from ..infrastructure.orm_models import DocumentArtifactRecord
         from sqlalchemy import select
@@ -129,43 +123,99 @@ class PaperService:
                 DocumentArtifactRecord.document_id == id,
                 DocumentArtifactRecord.kind == "json",
             )))
-        artifact = next((item for item in artifacts if item.archive_path == "layout.json"), None)
+        artifact = next((item for item in artifacts if item.archive_path.endswith("_content_list.json")), None)
         if not artifact:
             return []
         try:
             payload = json.loads(R2ObjectStore().read(artifact.object_key))
         except (UnicodeDecodeError, json.JSONDecodeError):
             return []
+        return payload if isinstance(payload, list) else []
 
-        boxes: list[dict] = []
-        for page in payload.get("pdf_info", []) if isinstance(payload, dict) else []:
-            page_index, page_size = page.get("page_idx"), page.get("page_size")
-            if not isinstance(page_index, int) or not isinstance(page_size, list) or len(page_size) != 2:
+    @staticmethod
+    def content_list_markdown(item: dict) -> str:
+        item_type = item.get("type")
+        if item_type in {"text", "ref_text"}:
+            text = str(item.get("text") or "").strip()
+            if item_type == "text" and isinstance(item.get("text_level"), int) and item["text_level"] > 0:
+                return f"{'#' * min(item['text_level'], 6)} {text}" if text else ""
+            return text
+        if item_type == "equation":
+            return str(item.get("text") or "").strip()
+        if item_type in {"image", "chart"}:
+            captions = item.get("image_caption" if item_type == "image" else "chart_caption") or []
+            caption = " ".join(str(value) for value in captions).strip()
+            image_path = str(item.get("img_path") or "").strip()
+            return f"![{caption}]({image_path})" if image_path else caption
+        if item_type == "table":
+            caption = " ".join(str(value) for value in (item.get("table_caption") or [])).strip()
+            body = str(item.get("table_body") or "").strip()
+            return "\n\n".join(value for value in (caption, body) if value)
+        if item_type == "code":
+            return str(item.get("code_body") or "").strip()
+        return ""
+
+    def markdown_blocks(self, id: str) -> list[dict]:
+        """Expose compact, bbox-addressable Markdown blocks in MinerU reading order."""
+        ignored_types = {"aside_text", "header", "footer", "page_number", "page_footnote"}
+        blocks: list[dict] = []
+        for source_index, item in enumerate(self.content_list(id)):
+            if not isinstance(item, dict) or item.get("type") in ignored_types:
                 continue
-            page_width, page_height = page_size
-            if not all(isinstance(value, (int, float)) and value > 0 for value in (page_width, page_height)):
+            content = self.content_list_markdown(item)
+            bbox = item.get("bbox")
+            page_index = item.get("page_idx")
+            if not content or not isinstance(page_index, int) or not isinstance(bbox, list) or len(bbox) != 4:
                 continue
-            for index, block in enumerate(page.get("preproc_blocks", [])):
-                bbox = block.get("bbox") if isinstance(block, dict) else None
-                if not isinstance(bbox, list) or len(bbox) != 4 or not all(isinstance(value, (int, float)) for value in bbox):
-                    continue
-                x0, y0, x1, y1 = bbox
-                x0, x1 = max(0, min(page_width, x0)), max(0, min(page_width, x1))
-                y0, y1 = max(0, min(page_height, y0)), max(0, min(page_height, y1))
-                if x1 <= x0 or y1 <= y0:
-                    continue
-                boxes.append({
-                    "id": f"{page_index}:{block.get('index', index)}",
-                    "pageIndex": page_index,
-                    "pageWidth": page_width,
-                    "pageHeight": page_height,
-                    "x0": x0,
-                    "y0": y0,
-                    "x1": x1,
-                    "y1": y1,
-                    "type": str(block.get("type", "content")),
-                })
-        return boxes
+            if not all(isinstance(value, (int, float)) for value in bbox):
+                continue
+            x0, y0, x1, y1 = (max(0, min(1000, value)) for value in bbox)
+            if x1 <= x0 or y1 <= y0:
+                continue
+            blocks.append({
+                "id": f"content:{source_index}",
+                "index": source_index,
+                "content": content,
+                "pageIndex": page_index,
+                "bbox": [x0, y0, x1, y1],
+                "type": str(item.get("type", "content")),
+            })
+        return blocks
+
+    def markdown_block_indices(self, id: str) -> set[int]:
+        blocks = self.markdown_blocks(id)
+        if blocks:
+            return {block["index"] for block in blocks}
+        content, _ = self.markdown(id)
+        sections = [part.strip() for part in re.split(r"(?=^#{1,6}\s)", content, flags=re.MULTILINE) if part.strip()]
+        return set(range(len(sections) or 1))
+
+    def translated_markdown_blocks(self, id: str, target_language: str) -> list[dict]:
+        translated, _ = self.translated_markdown(id, target_language)
+        metadata = {block["index"]: block for block in self.markdown_blocks(id)}
+        pieces = re.split(r"^\s*<!-- mineru-block:(\d+) -->\s*$", translated, flags=re.MULTILINE)
+        blocks: list[dict] = []
+        for position in range(1, len(pieces), 2):
+            index, content = int(pieces[position]), pieces[position + 1].strip()
+            source = metadata.get(index)
+            if source and content:
+                blocks.append({**source, "content": content})
+        return blocks
+
+    def layout_boxes(self, id: str) -> list[dict]:
+        """Return the same content-list bboxes used by the Markdown view."""
+        return [{
+            "id": block["id"],
+            "blockIndex": block["index"],
+            "pageIndex": block["pageIndex"],
+            "pageWidth": 1000,
+            "pageHeight": 1000,
+            "x0": block["bbox"][0],
+            "y0": block["bbox"][1],
+            "x1": block["bbox"][2],
+            "y1": block["bbox"][3],
+            "type": block["type"],
+        } for block in self.markdown_blocks(id)]
 
     @staticmethod
     def translation_language(target_language: str) -> dict:
@@ -195,9 +245,12 @@ class PaperService:
         paper = self.paper(id)
         language = self.translation_language(target_language)
         source, source_artifact = self.markdown(id)
+        canonical_blocks = self.markdown_blocks(id)
+        if canonical_blocks:
+            source = "\n\n".join(f"<!-- mineru-block:{block['index']} -->\n{block['content']}" for block in canonical_blocks)
         archive_path = self.translation_path(language["code"], source_artifact.archive_path)
         cfg = self.config.get(masked=False)
-        instruction = "You translate academic Markdown. Return only translated Markdown. Translate prose only; preserve every Markdown construct, headings, lists, tables, links, URLs, image paths, HTML, code fences, inline code, LaTex/math, citations, and whitespace/layout. Do not add or remove sections."
+        instruction = "You translate academic Markdown. Return only translated Markdown. Translate prose only; preserve every Markdown construct, headings, lists, tables, links, URLs, image paths, HTML, code fences, inline code, LaTex/math, citations, and whitespace/layout. Do not add or remove sections. HTML comments in the form <!-- mineru-block:N --> are structural block markers: preserve each one exactly, in the same order."
         translated = await self.llm.generate(
             cfg,
             f"Target language: {language['name']} ({language['code']})\n\nMarkdown to translate:\n{source}",

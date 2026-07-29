@@ -63,9 +63,9 @@ def get_paper_asset(paper_id: str, asset_path: str):
 def get_markdown(paper_id: str, target_language: str | None = Query(None, alias="targetLanguage")):
     if target_language:
         markdown, _ = papers.translated_markdown(paper_id, target_language)
-        return {"content": markdown, "targetLanguage": target_language, "isTranslation": True}
+        return {"content": markdown, "blocks": papers.translated_markdown_blocks(paper_id, target_language), "targetLanguage": target_language, "isTranslation": True}
     markdown, _ = papers.markdown(paper_id)
-    return {"content": markdown, "isTranslation": False}
+    return {"content": markdown, "blocks": papers.markdown_blocks(paper_id), "isTranslation": False}
 
 @router.post("/papers/{paper_id}/translations", status_code=202)
 async def translate_markdown(paper_id: str, payload: dict = Body(...)):
@@ -117,7 +117,7 @@ def add_remark(payload: dict):
     block_index = payload.get("blockIndex")
     if isinstance(block_index, bool) or not isinstance(block_index, int) or block_index < 0:
         raise ValidationError("blockIndex must be a non-negative integer")
-    if block_index >= papers.markdown_block_count(payload["paperId"]):
+    if block_index not in papers.markdown_block_indices(payload["paperId"]):
         raise ValidationError("blockIndex does not refer to a Markdown block in this paper")
     comment = str(payload["comment"]).strip()
     if not comment:
