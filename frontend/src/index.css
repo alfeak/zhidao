@@ -124,6 +124,26 @@
 }
 
 
+/* Logo hover: invert background, keep text & border, breathe */
+.logo-breathe:hover {
+  background-color: white !important;
+  animation: logo-breathe 2s ease-in-out infinite;
+}
+.dark .logo-breathe:hover {
+  background-color: black !important;
+}
+@keyframes logo-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(0,0,0,0); }
+  50%      { box-shadow: 0 0 10px 3px rgba(0,0,0,0.35); }
+}
+.dark .logo-breathe:hover {
+  animation-name: logo-breathe-dark;
+}
+@keyframes logo-breathe-dark {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255,255,255,0); }
+  50%      { box-shadow: 0 0 10px 3px rgba(255,255,255,0.35); }
+}
+
 /* The document page remains white for accurate PDF colors; the surrounding reader
    surface follows the global light/dark theme. */
 .pdf-document .react-pdf__Page {

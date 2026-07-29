@@ -140,7 +140,7 @@ export default function App() {
   return (
     <div className="h-screen w-screen flex flex-col min-h-0 overflow-hidden bg-white font-sans text-gray-800 transition-colors duration-300 dark:bg-slate-950 dark:text-slate-100">
       <header className="relative z-10 flex h-16 shrink-0 items-center justify-between border-b border-gray-200 bg-white px-5 select-none dark:border-slate-800 dark:bg-slate-900">
-        <div className="rounded-[2px] border-2 border-black bg-black px-3 py-0.5 font-display text-base font-black tracking-widest text-white shadow-sm dark:border-white dark:bg-white dark:text-black">知道</div>
+        <div className="logo-breathe cursor-pointer rounded-[2px] border-2 border-black bg-black px-3 py-0.5 font-display text-base font-black tracking-widest text-white shadow-sm transition-colors duration-500 dark:border-white dark:bg-white dark:text-black">知道</div>
         <div className="pointer-events-none absolute left-1/2 flex -translate-x-1/2 items-center gap-2 rounded border border-slate-300 bg-slate-50 px-3.5 py-1 font-mono text-sm font-bold tracking-widest shadow-xs dark:border-slate-800 dark:bg-slate-950">
           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-slate-800 dark:bg-slate-200" />
           {time || '00:00:00'}
