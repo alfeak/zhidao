@@ -6,6 +6,7 @@
 import React, { useState } from 'react';
 import { Search, FileText, Trash2, RefreshCw, AlertCircle, Clock, Loader2, CheckCircle2 } from 'lucide-react';
 import { Paper } from '../types';
+import ConfirmPopover from './ConfirmPopover';
 
 interface PaperListProps {
   papers: Paper[];
@@ -23,6 +24,7 @@ export default function PaperList({
   onRetryDecode,
 }: PaperListProps) {
   const [searchQuery, setSearchQuery] = useState('');
+  const [paperPendingDelete, setPaperPendingDelete] = useState<Paper | null>(null);
 
   const filteredPapers = papers.filter((paper) =>
     paper.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -127,13 +129,24 @@ export default function PaperList({
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      onDeletePaper(paper.id);
+                      setPaperPendingDelete(paper);
                     }}
                     title="删除论文"
                     className="p-1 text-gray-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded transition-colors cursor-pointer"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
+                  {paperPendingDelete?.id === paper.id && (
+                    <ConfirmPopover
+                      title="删除论文？"
+                      description="备注和翻译任务记录也会被删除。原始解析文件会保留以便再次导入。"
+                      onCancel={() => setPaperPendingDelete(null)}
+                      onConfirm={() => {
+                        onDeletePaper(paper.id);
+                        setPaperPendingDelete(null);
+                      }}
+                    />
+                  )}
                 </div>
               </div>
             );

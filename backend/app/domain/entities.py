@@ -32,7 +32,7 @@ class ChatMessage:
 class Remark:
     id: str
     paper_id: str
-    block_id: str
+    block_index: int
     comment: str
     color: str
     created_at: str

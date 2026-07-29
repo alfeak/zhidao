@@ -1,4 +1,4 @@
-import React from 'react';
+import { memo, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -12,25 +12,32 @@ interface MarkdownRendererProps {
   paperId?: string;
 }
 
+const remarkPlugins = [remarkGfm, remarkMath];
+const rehypePlugins = [rehypeRaw, rehypeSanitize, rehypeKatex];
+
 function resolveImageSource(source: string | undefined, paperId?: string) {
   if (!source || !paperId || /^(?:https?:|data:|blob:|#)/i.test(source)) return source;
   const assetPath = source.replace(/^\.\//, '').split('/').map(encodeURIComponent).join('/');
   return `/api/papers/${encodeURIComponent(paperId)}/assets/${assetPath}`;
 }
 
-export default function MarkdownRenderer({ content, paperId }: MarkdownRendererProps) {
+function MarkdownRenderer({ content, paperId }: MarkdownRendererProps) {
+  const components = useMemo(() => ({
+    table: ({ children }: { children?: React.ReactNode }) => <div className="my-4 w-full overflow-x-auto"><table>{children}</table></div>,
+    img: ({ src, alt, ...props }: React.ImgHTMLAttributes<HTMLImageElement>) => (
+      <img {...props} src={resolveImageSource(src, paperId)} alt={alt || ''} loading="lazy" className="my-4 h-auto max-w-full rounded border border-slate-200 dark:border-slate-700" />
+    ),
+  }), [paperId]);
+
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm, remarkMath]}
-      rehypePlugins={[rehypeRaw, rehypeSanitize, rehypeKatex]}
-      components={{
-        table: ({ children }) => <div className="my-4 w-full overflow-x-auto"><table>{children}</table></div>,
-        img: ({ src, alt, ...props }) => (
-          <img {...props} src={resolveImageSource(src, paperId)} alt={alt || ''} loading="lazy" className="my-4 h-auto max-w-full rounded border border-slate-200 dark:border-slate-700" />
-        ),
-      }}
+      remarkPlugins={remarkPlugins}
+      rehypePlugins={rehypePlugins}
+      components={components}
     >
       {content}
     </ReactMarkdown>
   );
 }
+
+export default memo(MarkdownRenderer);

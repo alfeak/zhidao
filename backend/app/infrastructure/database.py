@@ -13,6 +13,15 @@ def initialize_database():
         with engine.begin() as conn:
             for name in names: conn.exec_driver_sql(f'DROP TABLE IF EXISTS "{name}"')
     Base.metadata.create_all(engine)
+    # create_all does not add columns to an existing SQLite table. Keep this
+    # small compatibility migration here because the application bootstraps its
+    # schema directly in local and Docker deployments.
+    if "translation_language" not in {column["name"] for column in inspect(engine).get_columns("document_artifacts")}:
+        with engine.begin() as conn:
+            conn.exec_driver_sql("ALTER TABLE document_artifacts ADD COLUMN translation_language VARCHAR")
+    if "block_index" not in {column["name"] for column in inspect(engine).get_columns("remarks")}:
+        with engine.begin() as conn:
+            conn.exec_driver_sql("ALTER TABLE remarks ADD COLUMN block_index INTEGER")
     with SessionLocal.begin() as s:
         s.merge(SchemaMetadataRecord(key="schema_version", value="2"))
         if s.scalar(select(ModelRecord.id).limit(1)) is None:

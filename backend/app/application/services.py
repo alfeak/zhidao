@@ -1,8 +1,11 @@
 import hashlib
+import asyncio
 from datetime import datetime, timezone
 from uuid import uuid4
 import re
+from pathlib import PurePosixPath
 from ..domain.errors import NotFoundError, ValidationError
+from ..domain.translation_languages import TRANSLATION_LANGUAGE_BY_CODE
 from ..infrastructure.mineru_client import MinerUClient
 from ..infrastructure.object_store import R2ObjectStore
 from ..infrastructure.repositories import PaperRepository, ConfigRepository, CollaborationRepository
@@ -14,9 +17,14 @@ class PaperService:
         self.papers, self.config, self.collaboration = PaperRepository(), ConfigRepository(), CollaborationRepository()
         self.mineru = MinerUClient(); self.title_resolver = PaperTitleResolver()
         self.llm = OpenAICompatibleGateway()
+        self._translation_tasks: dict[str, asyncio.Task] = {}
 
     @staticmethod
     def now(): return datetime.now(timezone.utc).isoformat()
+
+    @staticmethod
+    def identifier(prefix: str) -> str:
+        return f"{prefix}_{uuid4().hex[:12]}"
 
     @staticmethod
     def identifier_for_url(url: str) -> str:
@@ -25,6 +33,10 @@ class PaperService:
 
     def list_papers(self): return self.papers.list()
 
+    def paper(self, id):
+        paper = self.papers.get(id)
+        if not paper: raise NotFoundError("Paper not found")
+        return paper
     async def import_paper(self, url, title=None):
         if not url or not url.strip(): raise ValidationError("Paper URL is required")
         r = await self.title_resolver.resolve(url, title)
@@ -41,7 +53,7 @@ class PaperService:
         except Exception:
             cached_artifacts = []
 
-        has_markdown = any(a.archive_path.endswith(".md") for a in cached_artifacts)
+        has_markdown = any(a.archive_path.endswith(".md") and not a.archive_path.startswith("translations/") for a in cached_artifacts)
 
         # 3. If R2 cache hit, populate database and skip MinerU parsing
         if has_markdown:
@@ -72,7 +84,7 @@ class PaperService:
                 cached_artifacts = R2ObjectStore().list_cached_artifacts(id)
             except Exception:
                 cached_artifacts = []
-            if any(a.archive_path.endswith(".md") for a in cached_artifacts):
+            if any(a.archive_path.endswith(".md") and not a.archive_path.startswith("translations/") for a in cached_artifacts):
                 self.papers.save_artifacts(id, cached_artifacts)
                 return
 
@@ -86,15 +98,96 @@ class PaperService:
         if not a: raise NotFoundError("Document object was not found.")
         return a
 
-    def markdown(self, id):
+    def markdown_artifact(self, id):
         from ..infrastructure.database import SessionLocal
         from ..infrastructure.orm_models import DocumentArtifactRecord
         from sqlalchemy import select
         with SessionLocal() as s:
             a = s.scalar(select(DocumentArtifactRecord).where(DocumentArtifactRecord.document_id == id, DocumentArtifactRecord.kind == "markdown"))
         if not a: raise NotFoundError("Markdown was not found.")
-        return R2ObjectStore().read(a.object_key).decode("utf-8"), a
+        return a
 
+    def markdown(self, id):
+        artifact = self.markdown_artifact(id)
+        return R2ObjectStore().read(artifact.object_key).decode("utf-8"), artifact
+
+    def markdown_block_count(self, id: str) -> int:
+        """Return the canonical block count used by both original and translated views."""
+        content, _ = self.markdown(id)
+        blocks = [part.strip() for part in re.split(r"(?=^#{1,6}\s)", content, flags=re.MULTILINE) if part.strip()]
+        return len(blocks) or 1
+
+    @staticmethod
+    def translation_language(target_language: str) -> dict:
+        if not isinstance(target_language, str): raise ValidationError("targetLanguage must be a string")
+        language = TRANSLATION_LANGUAGE_BY_CODE.get(target_language.strip())
+        if not language: raise ValidationError("targetLanguage must be one of the supported language codes")
+        return language
+
+    @classmethod
+    def translation_path(cls, target_language: str, source_archive_path: str) -> str:
+        language = cls.translation_language(target_language)
+        source_name = PurePosixPath(source_archive_path).name
+        stem = PurePosixPath(source_name).stem
+        return f"translations/{stem}.{language['code']}.md"
+
+    def translated_markdown(self, id: str, target_language: str):
+        language = self.translation_language(target_language)
+        from ..infrastructure.database import SessionLocal
+        from ..infrastructure.orm_models import DocumentArtifactRecord
+        from sqlalchemy import select
+        with SessionLocal() as s:
+            artifact = s.scalar(select(DocumentArtifactRecord).where(DocumentArtifactRecord.document_id == id, DocumentArtifactRecord.kind == "translation", DocumentArtifactRecord.translation_language == language["code"]))
+        if not artifact or artifact.kind != "translation": raise NotFoundError("Translation was not found.")
+        return R2ObjectStore().read(artifact.object_key).decode("utf-8"), artifact
+
+    async def translate_markdown(self, id: str, target_language: str):
+        paper = self.paper(id)
+        language = self.translation_language(target_language)
+        source, source_artifact = self.markdown(id)
+        archive_path = self.translation_path(language["code"], source_artifact.archive_path)
+        cfg = self.config.get(masked=False)
+        instruction = "You translate academic Markdown. Return only translated Markdown. Translate prose only; preserve every Markdown construct, headings, lists, tables, links, URLs, image paths, HTML, code fences, inline code, LaTex/math, citations, and whitespace/layout. Do not add or remove sections."
+        translated = await self.llm.generate(
+            cfg,
+            f"Target language: {language['name']} ({language['code']})\n\nMarkdown to translate:\n{source}",
+            system_instruction=instruction,
+        )
+        if not translated.strip(): raise ValidationError("The translation model returned an empty document.")
+        stored = R2ObjectStore().put(id, archive_path, translated.encode("utf-8"))
+        self.papers.save_translation(id, stored, language["code"])
+        return {"paperId": paper["id"], "targetLanguage": language["code"], "archivePath": archive_path, "content": translated}
+
+    async def enqueue_translation(self, id: str, target_language: str):
+        self.paper(id)
+        self.markdown(id)  # Fail fast when parsing has not completed.
+        language = self.translation_language(target_language)
+        job, _ = self.papers.enqueue_translation(id, language["code"], self.now())
+        # Scheduling is idempotent. Re-attempt it for an existing pending job so
+        # a request can recover from an unexpected in-process task loss.
+        self.schedule_translation(id)
+        return job
+
+    def schedule_translation(self, id: str):
+        current = self._translation_tasks.get(id)
+        if current and not current.done(): return
+        task = asyncio.create_task(self.run_translation_job(id), name=f"translation:{id}")
+        self._translation_tasks[id] = task
+        task.add_done_callback(lambda _: self._translation_tasks.pop(id, None))
+
+    async def run_translation_job(self, id: str):
+        job = self.papers.claim_translation(id, self.now())
+        if not job: return
+        try:
+            await self.translate_markdown(id, job["targetLanguage"])
+        except Exception as error:
+            self.papers.finish_translation(id, "failed", str(error), self.now())
+        else:
+            self.papers.finish_translation(id, "done", None, self.now())
+
+    async def recover_translation_jobs(self):
+        for id in self.papers.resume_translation_jobs(self.now()):
+            self.schedule_translation(id)
     async def chat(self, id: str, message: str):
         paper = self.papers.get(id)
         if not paper: raise NotFoundError("Paper not found")

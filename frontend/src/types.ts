@@ -20,6 +20,19 @@ export interface Paper {
   decodeError?: string;
   mdBlocks?: MarkdownBlock[];
   importedAt: string;
+  translations?: Array<{ targetLanguage: string; archivePath: string }>;
+  translationJob?: {
+    targetLanguage: string;
+    status: 'pending' | 'processing' | 'done' | 'failed';
+    error?: string | null;
+    createdAt: string;
+    updatedAt: string;
+  };
+}
+
+export interface TranslationLanguage {
+  code: string;
+  name: string;
 }
 
 export interface ChatMessage {
@@ -33,7 +46,7 @@ export interface ChatMessage {
 export interface HighlightRemark {
   id: string;
   paperId: string;
-  blockId: string; // Refers to MarkdownBlock.id
+  blockIndex: number; // Canonical source Markdown block index, shared by translations.
   comment: string;
   color: string; // CSS color or Tailwind class
   createdAt: string;

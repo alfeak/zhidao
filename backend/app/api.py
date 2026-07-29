@@ -1,8 +1,9 @@
-from fastapi import APIRouter, BackgroundTasks, Body, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Body, HTTPException, Query
 from .application.services import PaperService
 from .domain.errors import NotFoundError, ValidationError
 from fastapi.responses import StreamingResponse
 from .infrastructure.repositories import ConfigRepository
+from .domain.translation_languages import TRANSLATION_LANGUAGES
 
 router = APIRouter(prefix="/api")
 papers = PaperService()
@@ -13,6 +14,9 @@ def require(value, name):
 
 @router.get("/config")
 def get_config(): return config.get(masked=True)
+
+@router.get("/translation-languages")
+def get_translation_languages(): return {"languages": TRANSLATION_LANGUAGES}
 
 @router.post("/config")
 def update_config(payload: dict = Body(...)):
@@ -51,9 +55,20 @@ def get_paper_asset(paper_id: str, asset_path: str):
     return StreamingResponse(body.iter_chunks(), media_type=media_type)
 
 @router.get("/papers/{paper_id}/markdown")
-def get_markdown(paper_id: str):
+def get_markdown(paper_id: str, target_language: str | None = Query(None, alias="targetLanguage")):
+    if target_language:
+        markdown, _ = papers.translated_markdown(paper_id, target_language)
+        return {"content": markdown, "targetLanguage": target_language, "isTranslation": True}
     markdown, _ = papers.markdown(paper_id)
-    return {"content": markdown}
+    return {"content": markdown, "isTranslation": False}
+
+@router.post("/papers/{paper_id}/translations", status_code=202)
+async def translate_markdown(paper_id: str, payload: dict = Body(...)):
+    job = await papers.enqueue_translation(paper_id, payload.get("targetLanguage"))
+    return {"success": True, "translationJob": job}
+
+@router.get("/papers/{paper_id}")
+def get_paper(paper_id: str): return papers.paper(paper_id)
 @router.get("/papers")
 def list_papers(): return papers.list_papers()
 
@@ -92,11 +107,32 @@ def get_remarks(paper_id: str): return papers.collaboration.remarks(paper_id)
 
 @router.post("/remarks")
 def add_remark(payload: dict):
-    require(payload.get("paperId"), "paperId"); require(payload.get("blockId"), "blockId"); require(payload.get("comment"), "comment")
-    remark = {"id": papers.identifier("remark"), "paperId": payload["paperId"], "blockId": payload["blockId"], "comment": payload["comment"], "color": payload.get("color") or "#fef08a", "createdAt": papers.now()}
-    return papers.collaboration.add_remark(remark)
+    require(payload.get("paperId"), "paperId")
+    require(payload.get("comment"), "comment")
+    block_index = payload.get("blockIndex")
+    if isinstance(block_index, bool) or not isinstance(block_index, int) or block_index < 0:
+        raise ValidationError("blockIndex must be a non-negative integer")
+    if block_index >= papers.markdown_block_count(payload["paperId"]):
+        raise ValidationError("blockIndex does not refer to a Markdown block in this paper")
+    comment = str(payload["comment"]).strip()
+    if not comment:
+        raise ValidationError("comment is required")
+    remark = {
+        "id": papers.identifier("remark"),
+        "paperId": payload["paperId"],
+        "blockIndex": block_index,
+        "comment": comment,
+        "color": payload.get("color") or "#fef08a",
+        "createdAt": papers.now(),
+    }
+    saved = papers.collaboration.add_remark(remark)
+    if not saved:
+        raise NotFoundError("Paper not found")
+    return saved
 
 @router.delete("/remarks/{remark_id}")
 def delete_remark(remark_id: str):
-    papers.collaboration.delete_remark(remark_id); return {"success": True}
+    if not papers.collaboration.delete_remark(remark_id):
+        raise NotFoundError("Remark not found")
+    return {"success": True}
 

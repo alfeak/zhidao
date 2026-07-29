@@ -42,6 +42,10 @@ class R2ObjectStore:
             stored.append(StoredObject(archive_path, key, content_type, len(payload), hashlib.sha256(payload).hexdigest()))
         return stored
 
+    def put(self, document_id: str, archive_path: str, payload: bytes) -> StoredObject:
+        """Store one generated document artifact alongside MinerU artifacts."""
+        return self.put_archive(document_id, {archive_path: payload})[0]
+
     def read(self, key: str) -> bytes:
         return self.client.get_object(Bucket=self.bucket, Key=key)["Body"].read()
 

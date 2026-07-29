@@ -7,13 +7,14 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from .api import router
+from .api import router, papers
 from .domain.errors import NotFoundError, ValidationError
 from .infrastructure.database import initialize_database
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     initialize_database()
+    await papers.recover_translation_jobs()
     yield
 
 app = FastAPI(title="Zhidao API", version="1.0.0", lifespan=lifespan)

@@ -30,6 +30,7 @@ class DocumentRecord(Base):
     mineru_version: Mapped[str | None] = mapped_column(String)
     imported_at: Mapped[str] = mapped_column(String, nullable=False)
     artifacts: Mapped[list["DocumentArtifactRecord"]] = relationship(back_populates="document", cascade="all, delete-orphan")
+    translation_job: Mapped["TranslationJobRecord | None"] = relationship(back_populates="document", cascade="all, delete-orphan", uselist=False)
     messages: Mapped[list["ChatMessageRecord"]] = relationship(back_populates="document", cascade="all, delete-orphan")
     remarks: Mapped[list["RemarkRecord"]] = relationship(back_populates="document", cascade="all, delete-orphan")
 
@@ -44,7 +45,20 @@ class DocumentArtifactRecord(Base):
     content_type: Mapped[str] = mapped_column(String, nullable=False)
     byte_size: Mapped[int] = mapped_column(Integer, nullable=False)
     sha256: Mapped[str] = mapped_column(String, nullable=False)
+    translation_language: Mapped[str | None] = mapped_column(String)
     document: Mapped[DocumentRecord] = relationship(back_populates="artifacts")
+
+class TranslationJobRecord(Base):
+    """One durable translation state machine per document."""
+    __tablename__ = "translation_jobs"
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    document_id: Mapped[str] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    target_language: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+    document: Mapped[DocumentRecord] = relationship(back_populates="translation_job")
 
 class ChatMessageRecord(Base):
     __tablename__ = "chat_messages"
@@ -59,6 +73,10 @@ class RemarkRecord(Base):
     __tablename__ = "remarks"
     id: Mapped[str] = mapped_column(String, primary_key=True)
     document_id: Mapped[str] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Canonical position in the source Markdown. It is language-independent,
+    # so the same remark can be rendered in original and translated views.
+    block_index: Mapped[int | None] = mapped_column(Integer, index=True)
+    # Retained only for compatibility with databases created before block_index.
     block_id: Mapped[str] = mapped_column(String, nullable=False)
     comment: Mapped[str] = mapped_column(Text, nullable=False)
     color: Mapped[str] = mapped_column(String, nullable=False)
