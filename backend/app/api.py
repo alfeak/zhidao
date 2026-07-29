@@ -253,6 +253,33 @@ async def send_chat(request: Request, paper_id: str, payload: dict = Body(...), 
         raise ValidationError("Chat message text is required")
     return await papers.chat(paper_id, str(msg_text).strip(), user_id=user_id)
 
+@router.post("/papers/{paper_id}/chat/stream")
+async def stream_chat(request: Request, paper_id: str, payload: dict = Body(...), zhidao_session: str | None = Cookie(None)):
+    import json as _json
+    user = get_current_user_from_req(request, zhidao_session)
+    user_id = user["id"] if user else None
+    msg_text = payload.get("message") or payload.get("content")
+    if not msg_text or not str(msg_text).strip():
+        raise ValidationError("Chat message text is required")
+
+    async def event_stream():
+        try:
+            async for item in papers.chat_stream(paper_id, str(msg_text).strip(), user_id=user_id):
+                if isinstance(item, str):
+                    yield f"data: {_json.dumps({'type': 'chunk', 'content': item}, ensure_ascii=False)}\n\n"
+                elif isinstance(item, dict):
+                    yield f"data: {_json.dumps({'type': 'done', 'message': item}, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            yield f"data: {_json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+
 @router.post("/papers/{paper_id}/chat/clear")
 def clear_chat(request: Request, paper_id: str, zhidao_session: str | None = Cookie(None)):
     user = get_current_user_from_req(request, zhidao_session)

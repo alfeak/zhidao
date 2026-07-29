@@ -169,7 +169,7 @@ export default function LandingPage({ googleClientId, onGoogleLogin }: Props) {
       const btnContainer = document.getElementById('googleSignInDiv');
       if (btnContainer && !btnContainer.hasChildNodes()) {
         window.google.accounts.id.renderButton(btnContainer, {
-          theme: 'filled_black',
+          theme: 'filled_white',
           size: 'large',
           shape: 'pill',
           width: 320,

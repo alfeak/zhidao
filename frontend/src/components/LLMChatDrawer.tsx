@@ -50,53 +50,79 @@ export default function LLMChatDrawer({ paper, user, isOpen }: Props) {
     const text = input.trim();
     if (!text || loading) return;
 
-    const tempUserMsg: ChatMessage = {
-      id: `temp_user_${Date.now()}`,
-      paperId: paper.id,
-      role: 'user',
-      content: text,
-      createdAt: new Date().toISOString(),
-    };
+    const tempUserId = `temp_user_${Date.now()}`;
+    const tempAssistantId = `temp_asst_${Date.now()}`;
 
-    setMessages((prev) => [...prev, tempUserMsg]);
+    setMessages((prev) => [
+      ...prev,
+      { id: tempUserId, paperId: paper.id, role: 'user', content: text, createdAt: new Date().toISOString() },
+      { id: tempAssistantId, paperId: paper.id, role: 'assistant', content: '', createdAt: new Date().toISOString() },
+    ]);
     setInput('');
     setLoading(true);
 
     try {
-      const response = await fetch(`/api/papers/${paper.id}/chat`, {
+      const response = await fetch(`/api/papers/${paper.id}/chat/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text }),
       });
-      if (response.ok) {
-        const assistantMsg = await response.json();
-        setMessages((prev) => [...prev, assistantMsg]);
-      } else {
+
+      if (!response.ok || !response.body) {
         const errJson = await response.json().catch(() => ({}));
         let errMsgText = '请检查后台大模型 API Key / URL 配置。';
         if (typeof errJson.detail === 'string' && errJson.detail) errMsgText = errJson.detail;
         else if (typeof errJson.error === 'string' && errJson.error) errMsgText = errJson.error;
         else if (typeof errJson.message === 'string' && errJson.message) errMsgText = errJson.message;
+        setMessages((prev) =>
+          prev.map((m) => m.id === tempAssistantId ? { ...m, content: `⚠️ AI 响应失败: ${errMsgText}` } : m)
+        );
+        return;
+      }
 
-        const errorMsg: ChatMessage = {
-          id: `temp_err_${Date.now()}`,
-          paperId: paper.id,
-          role: 'assistant',
-          content: `⚠️ AI 响应失败: ${errMsgText}`,
-          createdAt: new Date().toISOString(),
-        };
-        setMessages((prev) => [...prev, errorMsg]);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const raw = line.slice(6).trim();
+          try {
+            const parsed = JSON.parse(raw) as { type: string; content?: string; message?: ChatMessage };
+            if (parsed.type === 'chunk' && parsed.content) {
+              setMessages((prev) =>
+                prev.map((m) => m.id === tempAssistantId ? { ...m, content: m.content + parsed.content! } : m)
+              );
+            } else if (parsed.type === 'done' && parsed.message) {
+              setMessages((prev) =>
+                prev.map((m) => m.id === tempAssistantId ? parsed.message! : m)
+              );
+            } else if (parsed.type === 'error') {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === tempAssistantId ? { ...m, content: `⚠️ AI 响应失败: ${String(parsed.message ?? '未知错误')}` } : m
+                )
+              );
+            }
+          } catch {
+            // ignore malformed SSE lines
+          }
+        }
       }
     } catch (err) {
       console.error('Error sending chat:', err);
-      const errorMsg: ChatMessage = {
-        id: `temp_err_${Date.now()}`,
-        paperId: paper.id,
-        role: 'assistant',
-        content: `⚠️ 网络异常，无法连接至后端 AI 服务。`,
-        createdAt: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, errorMsg]);
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === tempAssistantId ? { ...m, content: '⚠️ 网络异常，无法连接至后端 AI 服务。' } : m
+        )
+      );
     } finally {
       setLoading(false);
     }
@@ -199,9 +225,17 @@ export default function LLMChatDrawer({ paper, user, isOpen }: Props) {
               >
                 {msg.role === 'user' ? (
                   <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+                ) : msg.content === '' && loading ? (
+                  <span className="flex items-center gap-1 text-slate-400">
+                    <Loader2 className="h-3 w-3 animate-spin text-cyan-500" />
+                    <span>AI 正在思考...</span>
+                  </span>
                 ) : (
                   <div className="markdown-body text-xs leading-relaxed">
                     <MarkdownRenderer content={msg.content} paperId={paper.id} />
+                    {loading && msg.id.startsWith('temp_asst_') && (
+                      <span className="ml-0.5 inline-block h-3.5 w-0.5 animate-pulse bg-cyan-500 align-middle" />
+                    )}
                   </div>
                 )}
               </div>
@@ -209,17 +243,7 @@ export default function LLMChatDrawer({ paper, user, isOpen }: Props) {
           ))
         )}
 
-        {loading && (
-          <div className="flex gap-2.5">
-            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-cyan-600 text-white shadow-xs">
-              <Bot className="h-3.5 w-3.5" />
-            </div>
-            <div className="flex items-center gap-1.5 rounded-2xl rounded-tl-none border border-slate-200 bg-white px-3.5 py-2.5 text-xs text-slate-400 dark:border-slate-800 dark:bg-slate-900">
-              <Loader2 className="h-3.5 w-3.5 animate-spin text-cyan-500" />
-              <span>AI 正在结合全篇 Markdown 分析思考...</span>
-            </div>
-          </div>
-        )}
+
       </div>
 
       {/* Input Box */}

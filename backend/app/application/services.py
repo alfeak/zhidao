@@ -390,6 +390,42 @@ class PaperService:
 
         return assistant_msg
 
+    async def chat_stream(self, id: str, message: str, user_id: str | None = None):
+        """Async generator for streaming chat. Yields str chunks, then the saved assistant ChatMessage dict."""
+        paper = self.papers.get(id)
+        if not paper: raise NotFoundError("Paper not found")
+        cfg = self.config.get_for_user(user_id, masked=False)
+        user_msg = {"id": f"msg_{uuid4().hex[:8]}", "paperId": id, "role": "user", "content": message, "createdAt": self.now()}
+        self.collaboration.add_message(user_msg, user_id=user_id)
+        try:
+            markdown_content, _ = self.markdown(id)
+        except Exception:
+            markdown_content = ""
+        system_prompt = (
+            f"You are an expert AI research assistant analyzing the paper titled '{paper['title']}'.\n"
+            f"Paper URL: {paper['url']}\n"
+            f"Parsed Content (Markdown):\n{markdown_content[:15000]}\n"
+        )
+        parts: list[str] = []
+        async for chunk in self.llm.generate_stream(cfg, message, system_instruction=system_prompt):
+            parts.append(chunk)
+            yield chunk  # stream text chunk to caller
+
+        reply_text = "".join(parts)
+        if reply_text.strip():
+            assistant_msg = {"id": f"msg_{uuid4().hex[:8]}", "paperId": id, "role": "assistant", "content": reply_text, "createdAt": self.now()}
+            self.collaboration.add_message(assistant_msg, user_id=user_id)
+            if user_id:
+                try:
+                    all_msgs = self.collaboration.messages(id, user_id=user_id)
+                    chat_data = json.dumps(all_msgs, ensure_ascii=False, indent=2).encode("utf-8")
+                    R2ObjectStore(user_id=user_id).put(id, f"chats/{user_id}.json", chat_data)
+                except Exception:
+                    pass
+            yield assistant_msg  # final yield: the persisted message dict
+
+
+
     def clear_chat(self, id: str, user_id: str | None = None):
         self.collaboration.clear_messages(id, user_id=user_id)
         if user_id:
