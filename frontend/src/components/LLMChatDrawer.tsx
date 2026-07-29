@@ -73,7 +73,11 @@ export default function LLMChatDrawer({ paper, user, isOpen }: Props) {
         setMessages((prev) => [...prev, assistantMsg]);
       } else {
         const errJson = await response.json().catch(() => ({}));
-        const errMsgText = errJson.detail || errJson.error || errJson.message || '请检查后台大模型 API Key / URL 配置。';
+        let errMsgText = '请检查后台大模型 API Key / URL 配置。';
+        if (typeof errJson.detail === 'string' && errJson.detail) errMsgText = errJson.detail;
+        else if (typeof errJson.error === 'string' && errJson.error) errMsgText = errJson.error;
+        else if (typeof errJson.message === 'string' && errJson.message) errMsgText = errJson.message;
+
         const errorMsg: ChatMessage = {
           id: `temp_err_${Date.now()}`,
           paperId: paper.id,
@@ -170,7 +174,7 @@ export default function LLMChatDrawer({ paper, user, isOpen }: Props) {
               <div
                 className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
                   msg.role === 'user'
-                    ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900'
+                    ? 'bg-slate-800 text-white dark:bg-slate-700 dark:text-white shadow-xs'
                     : 'bg-cyan-600 text-white shadow-xs'
                 }`}
               >
