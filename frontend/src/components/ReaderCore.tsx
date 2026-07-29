@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { Eye, FileText, Sparkles, MessageSquare, Plus, PenTool, Check, Trash } from 'lucide-react';
+import { Eye, FileText, Sparkles, MessageSquare, Plus, PenTool, Check, Trash, RefreshCw } from 'lucide-react';
 import { Document, Page, pdfjs } from 'react-pdf';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
@@ -22,6 +22,7 @@ interface ReaderCoreProps {
   remarks: HighlightRemark[];
   onAddRemark: (blockId: string, comment: string, color: string) => void;
   onDeleteRemark: (remarkId: string) => void;
+  onRetryDecode?: (id: string) => void;
 }
 
 export default function ReaderCore({
@@ -31,16 +32,17 @@ export default function ReaderCore({
   remarks,
   onAddRemark,
   onDeleteRemark,
+  onRetryDecode,
 }: ReaderCoreProps) {
   const [viewMode, setViewMode] = useState<'pdf' | 'md'>('pdf');
   const [remarkText, setRemarkText] = useState('');
   const [selectedColor, setSelectedColor] = useState('#fef08a'); // Tailwind yellow-200
-  const [activeRemarkFormBlockId, setActiveRemarkFormBlockId] = useState<string | null>(null);
-  const [pageCount, setPageCount] = useState<number | null>(null);
+  const [activeRemarkFormBlockId, setActiveRemarkFormBlockId] = useState<string | null>(null);
+  const [pageCount, setPageCount] = useState<number | null>(null);
   const [pdfError, setPdfError] = useState<string | null>(null);
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
-  const [markdownBlocks, setMarkdownBlocks] = useState<MarkdownBlock[]>([]);
-  const [markdownError, setMarkdownError] = useState<string | null>(null);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [markdownBlocks, setMarkdownBlocks] = useState<MarkdownBlock[]>([]);
+  const [markdownError, setMarkdownError] = useState<string | null>(null);
   const [markdownLoading, setMarkdownLoading] = useState(false);
 
   useEffect(() => {
@@ -237,11 +239,27 @@ export default function ReaderCore({
             {paper.decodeStatus === 'failed' && (
               <div className="absolute top-4 left-4 right-4 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/30 p-4 rounded shadow-md flex items-center justify-between transition-colors duration-300">
                 <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-rose-500"></span>
-                  <p className="text-xs text-rose-800 dark:text-rose-300 font-medium">
-                    文档解析失败。请在右侧重试；解析成功后将显示 MinerU 返回的 PDF 和 Markdown。
-                  </p>
+                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0"></span>
+                  <div className="flex flex-col">
+                    <p className="text-xs text-rose-800 dark:text-rose-300 font-medium">
+                      文档解析失败。解析成功后将显示 MinerU 返回的 PDF 和 Markdown。
+                    </p>
+                    {paper.decodeError && (
+                      <p className="text-[11px] text-rose-600 dark:text-rose-400 mt-0.5 font-mono">
+                        报错原因: {paper.decodeError}
+                      </p>
+                    )}
+                  </div>
                 </div>
+                {onRetryDecode && (
+                  <button
+                    onClick={() => onRetryDecode(paper.id)}
+                    className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded text-xs font-bold transition-all shrink-0 cursor-pointer shadow-sm flex items-center gap-1.5"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>重试解析</span>
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -258,7 +276,7 @@ export default function ReaderCore({
                 </p>
               </div>
 
-              {markdownLoading ? (<div className="py-12 text-center text-sm text-slate-500">????????? Markdown�</div>) : markdownError ? (<div className="py-12 text-center text-sm text-rose-600">Markdown ????:{markdownError}</div>) : markdownBlocks.map((block) => {
+              {markdownLoading ? (<div className="py-12 text-center text-sm text-slate-500">????????? Markdown�</div>) : markdownError ? (<div className="py-12 text-center text-sm text-rose-600">Markdown ????:{markdownError}</div>) : markdownBlocks.map((block) => {
                 const isSelected = selectedBlock?.id === block.id;
                 const blockRemarks = remarks.filter((r) => r.blockId === block.id);
 
@@ -403,4 +421,4 @@ export default function ReaderCore({
     </div>
   );
 }
-
+

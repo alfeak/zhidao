@@ -6,12 +6,14 @@ from ..domain.errors import NotFoundError, ValidationError
 from ..infrastructure.mineru_client import MinerUClient
 from ..infrastructure.object_store import R2ObjectStore
 from ..infrastructure.repositories import PaperRepository, ConfigRepository, CollaborationRepository
+from ..infrastructure.openai_gateway import OpenAICompatibleGateway
 from .paper_title_resolver import PaperTitleResolver
 
 class PaperService:
     def __init__(self):
         self.papers, self.config, self.collaboration = PaperRepository(), ConfigRepository(), CollaborationRepository()
         self.mineru = MinerUClient(); self.title_resolver = PaperTitleResolver()
+        self.llm = OpenAICompatibleGateway()
 
     @staticmethod
     def now(): return datetime.now(timezone.utc).isoformat()
@@ -92,6 +94,51 @@ class PaperService:
             a = s.scalar(select(DocumentArtifactRecord).where(DocumentArtifactRecord.document_id == id, DocumentArtifactRecord.kind == "markdown"))
         if not a: raise NotFoundError("Markdown was not found.")
         return R2ObjectStore().read(a.object_key).decode("utf-8"), a
+
+    async def chat(self, id: str, message: str):
+        paper = self.papers.get(id)
+        if not paper: raise NotFoundError("Paper not found")
+        cfg = self.config.get(masked=False)
+        user_msg = {"id": f"msg_{uuid4().hex[:8]}", "paperId": id, "role": "user", "content": message, "createdAt": self.now()}
+        self.collaboration.add_message(user_msg)
+        try:
+            markdown_content, _ = self.markdown(id)
+        except Exception:
+            markdown_content = ""
+        system_prompt = (
+            f"You are an expert AI research assistant analyzing the paper titled '{paper['title']}'.\n"
+            f"Paper URL: {paper['url']}\n"
+            f"Parsed Content:\n{markdown_content[:6000]}\n"
+        )
+        reply = await self.llm.generate(cfg, message, system_instruction=system_prompt)
+        assistant_msg = {"id": f"msg_{uuid4().hex[:8]}", "paperId": id, "role": "assistant", "content": reply, "createdAt": self.now()}
+        self.collaboration.add_message(assistant_msg)
+        return assistant_msg
+
+    async def action(self, id: str, payload: dict):
+        paper = self.papers.get(id)
+        if not paper: raise NotFoundError("Paper not found")
+        action_type = payload.get("action")
+        target_lang = payload.get("targetLanguage", "Chinese (简体中文)")
+        cfg = self.config.get(masked=False)
+        try:
+            markdown_content, _ = self.markdown(id)
+        except Exception:
+            markdown_content = paper.get("title", "")
+        if action_type in ("translate_full", "translate"):
+            prompt = (
+                f"Please translate the following academic paper into {target_lang}.\n"
+                f"Maintain precise academic terminology, structure, and formatting.\n\n"
+                f"Paper Title: {paper['title']}\n\n"
+                f"Paper Content:\n{markdown_content[:10000]}"
+            )
+            result = await self.llm.generate(cfg, prompt, system_instruction=f"You are a professional academic translator specializing in translating papers into {target_lang}.")
+            return {"success": True, "result": result}
+        else:
+            prompt = f"Perform analysis '{action_type}' for target language '{target_lang}' on this paper content:\n{markdown_content[:8000]}"
+            result = await self.llm.generate(cfg, prompt)
+            return {"success": True, "result": result}
+
 
 
 

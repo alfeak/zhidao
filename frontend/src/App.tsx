@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Compass, MessageSquare, ClipboardList, Settings, BookOpen, Sparkles, Check, Server, Loader2, RefreshCw, Sun, Moon, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Compass, MessageSquare, ClipboardList, Settings, BookOpen, Sparkles, Check, Server, Loader2, RefreshCw, Sun, Moon, ChevronLeft, ChevronRight, Languages } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Paper, MarkdownBlock, ChatMessage, HighlightRemark, SystemConfig } from './types';
 import ImportModule from './components/ImportModule';
@@ -21,8 +21,8 @@ export default function App() {
   const [remarks, setRemarks] = useState<HighlightRemark[]>([]);
   const [actionResult, setActionResult] = useState<string | null>(null);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'chat' | 'result' | 'remarks' | 'config'>('config');
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<'chat' | 'result' | 'remarks' | 'config'>('result');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isLeftSidebarOpen, setIsLeftSidebarOpen] = useState(true);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     return (localStorage.getItem('zhidao-theme') as 'light' | 'dark') || 'light';
@@ -384,66 +384,20 @@ export default function App() {
             )}
           </button>
 
-          {/* Upper Bars (Tabs switcher) - highly space-efficient */}
-          <div className="flex bg-gray-100 dark:bg-slate-800 p-0.5 rounded gap-0.5 transition-colors duration-300">
-            {isPaperDecoded && (
-              <>
-                <button
-                  onClick={() => handleTabClick('chat')}
-                  className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded transition-all cursor-pointer ${
-                    isSidebarOpen && activeTab === 'chat'
-                      ? 'bg-white dark:bg-slate-700 text-black dark:text-white shadow-xs'
-                      : 'text-gray-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-200'
-                  }`}
-                >
-                  <MessageSquare className="w-3.5 h-3.5" />
-                  <span>多轮对话</span>
-                </button>
-
-                <button
-                  onClick={() => handleTabClick('result')}
-                  className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded transition-all relative cursor-pointer ${
-                    isSidebarOpen && activeTab === 'result'
-                      ? 'bg-white dark:bg-slate-700 text-black dark:text-white shadow-xs'
-                      : 'text-gray-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-200'
-                  }`}
-                >
-                  <ClipboardList className="w-3.5 h-3.5" />
-                  <span>解析输出</span>
-                  {actionResult && (
-                    <span className="absolute top-1 right-1 flex h-1.5 w-1.5">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500"></span>
-                    </span>
-                  )}
-                </button>
-
-                <button
-                  onClick={() => handleTabClick('remarks')}
-                  className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded transition-all cursor-pointer ${
-                    isSidebarOpen && activeTab === 'remarks'
-                      ? 'bg-white dark:bg-slate-700 text-black dark:text-white shadow-xs'
-                      : 'text-gray-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-200'
-                  }`}
-                >
-                  <Compass className="w-3.5 h-3.5" />
-                  <span>高亮批注 ({remarks.length})</span>
-                </button>
-              </>
-            )}
-
+          {/* Sidebar Toggle Button */}
+          {activePaper && (
             <button
-              onClick={() => handleTabClick('config')}
-              className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded transition-all cursor-pointer ${
-                isSidebarOpen && activeTab === 'config'
-                  ? 'bg-white dark:bg-slate-700 text-black dark:text-white shadow-xs'
-                  : 'text-gray-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-200'
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded transition-all cursor-pointer ${
+                isSidebarOpen
+                  ? 'bg-black text-white dark:bg-slate-100 dark:text-slate-900 shadow-xs'
+                  : 'bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-slate-300 hover:text-black dark:hover:text-white'
               }`}
             >
-              <Settings className="w-3.5 h-3.5" />
-              <span>参数配置</span>
+              <Languages className="w-3.5 h-3.5" />
+              <span>{isSidebarOpen ? '收起翻译栏' : '展开翻译栏'}</span>
             </button>
-          </div>
+          )}
         </div>
       </header>
 
@@ -492,12 +446,13 @@ export default function App() {
             remarks={remarks}
             onAddRemark={handleAddRemark}
             onDeleteRemark={handleDeleteRemark}
+            onRetryDecode={handleRetryDecode}
           />
         </main>
 
-        {/* Right column: LLM functionality and tools with smooth slide-out animation */}
+        {/* Right column: Translation functionality and output */}
         <AnimatePresence initial={false}>
-          {isSidebarOpen && (
+          {isSidebarOpen && activePaper && (
             <motion.section
               initial={{ width: 0, opacity: 0 }}
               animate={{ width: 380, opacity: 1 }}
@@ -514,18 +469,8 @@ export default function App() {
                 />
                 <LLMSidebar
                   paper={activePaper}
-                  selectedBlock={selectedBlock}
-                  chatMessages={chatMessages}
-                  remarks={remarks}
-                  config={config}
-                  onUpdateConfig={handleUpdateConfig}
-                  onSendMessage={handleSendMessage}
-                  onClearChat={handleClearChat}
-                  onDeleteRemark={handleDeleteRemark}
                   actionResult={actionResult}
                   clearingAction={() => setActionResult(null)}
-                  activeTab={activeTab}
-                  setActiveTab={setActiveTab}
                 />
               </div>
             </motion.section>
