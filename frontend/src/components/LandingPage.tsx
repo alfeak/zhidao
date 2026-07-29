@@ -225,7 +225,7 @@ export default function LandingPage({ googleClientId, onGoogleLogin }: Props) {
 
         {/* Clean & Minimalist Login Area */}
         <div className="w-full rounded-2xl border border-slate-800/80 bg-slate-900/70 p-8 shadow-2xl backdrop-blur-xl transition-all duration-300 hover:border-slate-700">
-          <h2 className="mb-6 text-xl font-bold tracking-wide text-slate-100">欢迎登录“知道”</h2>
+          <h2 className="mb-6 text-xl font-bold tracking-wide text-slate-100">欢迎登录</h2>
 
           {error && (
             <div className="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">
@@ -257,12 +257,12 @@ export default function LandingPage({ googleClientId, onGoogleLogin }: Props) {
             )}
           </div>
         </div>
-
-        {/* Restored Footer Info */}
-        <footer className="mt-12 text-center text-xs text-slate-600">
-          © 2026 知道 (Zhidao) • 智能文献阅读平台
-        </footer>
       </main>
+
+      {/* Footer Info Pinned to Screen Bottom Center */}
+      <footer className="absolute bottom-6 left-1/2 z-10 -translate-x-1/2 text-center text-xs text-slate-600">
+        © 2026 知道 (Zhidao) • 文献阅读平台
+      </footer>
     </div>
   );
 }
