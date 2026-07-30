@@ -14,8 +14,6 @@ services:
         required: false
     environment:
       - PYTHONUNBUFFERED=1
-      - SERVER_IP=${SERVER_IP:-}
-      - SERVER_URL=${SERVER_URL:-}
       # Clear any host proxy variables injected by Docker Desktop on Windows.
       # When a VPN (e.g. Clash) is active, Docker Desktop may inject
       # HTTP_PROXY=http://127.0.0.1:7890 into containers. That address is
