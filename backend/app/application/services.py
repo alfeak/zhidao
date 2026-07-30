@@ -382,7 +382,7 @@ class PaperService:
         system_prompt = (
             f"You are an expert AI research assistant analyzing the paper titled '{paper['title']}'.\n"
             f"Paper URL: {paper['url']}\n"
-            f"Parsed Content (Markdown):\n{markdown_content[:15000]}\n"
+            f"Full Parsed Content (Markdown):\n{markdown_content[:150000]}\n"
         )
         reply = await self.llm.generate(cfg, message, system_instruction=system_prompt)
         assistant_msg = {"id": f"msg_{uuid4().hex[:8]}", "paperId": id, "role": "assistant", "content": reply, "createdAt": self.now()}
@@ -413,7 +413,7 @@ class PaperService:
         system_prompt = (
             f"You are an expert AI research assistant analyzing the paper titled '{paper['title']}'.\n"
             f"Paper URL: {paper['url']}\n"
-            f"Parsed Content (Markdown):\n{markdown_content[:15000]}\n"
+            f"Full Parsed Content (Markdown):\n{markdown_content[:150000]}\n"
         )
         parts: list[str] = []
         async for chunk in self.llm.generate_stream(cfg, message, system_instruction=system_prompt):
