@@ -26,6 +26,7 @@ export default function App() {
     refresh,
     deletePaper,
     retryDecode,
+    updateTitle,
     startTranslation,
   } = usePaperWorkspace();
   const [selectedBlock, setSelectedBlock] = useState<MarkdownBlock | null>(null);
@@ -169,7 +170,7 @@ export default function App() {
           {isLeftSidebarOpen ? <ChevronLeft className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
         </button>
         <main className="flex min-h-0 flex-1 flex-col bg-white transition-colors duration-300 dark:bg-slate-950">
-          <ReaderCore paper={activePaper} selectedBlock={selectedBlock} onSelectBlock={setSelectedBlock} remarks={remarks} onAddRemark={addRemark} onDeleteRemark={removeRemark} translationLanguages={translationLanguages} onTranslate={translate} loadingAction={loadingAction} onRetryDecode={retryDecode} />
+          <ReaderCore paper={activePaper} selectedBlock={selectedBlock} onSelectBlock={setSelectedBlock} remarks={remarks} onAddRemark={addRemark} onDeleteRemark={removeRemark} translationLanguages={translationLanguages} onTranslate={translate} loadingAction={loadingAction} onRetryDecode={retryDecode} onUpdateTitle={updateTitle} />
         </main>
         {activePaper && (
           <button

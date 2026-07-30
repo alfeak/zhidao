@@ -234,6 +234,15 @@ async def import_paper(request: Request, payload: dict, background_tasks: Backgr
         background_tasks.add_task(papers.decode, paper["id"], user_id)
     return {"success": True, "paper": paper}
 
+@router.patch("/papers/{paper_id}/title")
+@router.put("/papers/{paper_id}/title")
+def update_paper_title(paper_id: str, payload: dict = Body(...)):
+    title = payload.get("title")
+    if not title or not str(title).strip():
+        raise ValidationError("Title is required")
+    updated = papers.update_title(paper_id, str(title).strip())
+    return {"success": True, "paper": updated}
+
 @router.delete("/papers/{paper_id}")
 def delete_paper(paper_id: str):
     papers.delete_paper(paper_id); return {"success": True}

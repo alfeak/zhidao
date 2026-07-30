@@ -21,6 +21,7 @@ interface Props {
   remarks: HighlightRemark[]; onAddRemark: (blockIndex: number, comment: string, color: string) => void; onDeleteRemark: (id: string) => void;
   translationLanguages: TranslationLanguage[]; onTranslate: (code: string) => Promise<void>; loadingAction: string | null;
   onRetryDecode?: (id: string) => void;
+  onUpdateTitle?: (id: string, newTitle: string) => Promise<void>;
 }
 
 const REMARK_COLORS = [
@@ -119,7 +120,7 @@ function JumpContextMenu({ mode, hasTranslation, onJump }: { mode: ReaderMode; h
   </div>;
 }
 
-export default function ReaderCore({ paper, selectedBlock, onSelectBlock, remarks, onAddRemark, onDeleteRemark, translationLanguages, onTranslate, loadingAction, onRetryDecode }: Props) {
+export default function ReaderCore({ paper, selectedBlock, onSelectBlock, remarks, onAddRemark, onDeleteRemark, translationLanguages, onTranslate, loadingAction, onRetryDecode, onUpdateTitle }: Props) {
   const [mode, setMode] = useState<ReaderMode>('pdf');
   const [language, setLanguage] = useState<string | null>(null);
   const [blocks, setBlocks] = useState<MarkdownBlock[]>([]);
@@ -496,6 +497,7 @@ export default function ReaderCore({ paper, selectedBlock, onSelectBlock, remark
       onZoomIn={handleZoomIn}
       onZoomOut={handleZoomOut}
       onResetZoom={handleResetZoom}
+      onUpdateTitle={onUpdateTitle}
     />
     <div
       ref={readerScrollRef}

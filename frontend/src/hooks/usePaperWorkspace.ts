@@ -35,6 +35,21 @@ export function usePaperWorkspace() {
     if (response.ok) await refresh();
   }, [refresh]);
 
+  const updateTitle = useCallback(async (id: string, newTitle: string) => {
+    const response = await fetch(`/api/papers/${id}/title`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: newTitle }),
+    });
+    if (!response.ok) {
+      const data = await response.json();
+      throw new Error(data.error || 'Failed to update title');
+    }
+    const data = await response.json();
+    setPapers((current) => current.map((p) => p.id === id ? { ...p, title: data.paper.title } : p));
+    setActivePaper((current) => current?.id === id ? { ...current, title: data.paper.title } : current);
+  }, []);
+
   const startTranslation = useCallback(async (targetLanguage: string) => {
     if (!activePaper) return;
     const response = await fetch(`/api/papers/${activePaper.id}/translations`, {
@@ -46,5 +61,5 @@ export function usePaperWorkspace() {
     setActivePaper((current) => current?.id === activePaper.id ? { ...current, translationJob: data.translationJob } : current);
   }, [activePaper]);
 
-  return { papers, activePaper, setActivePaper, refresh, deletePaper, retryDecode, startTranslation };
+  return { papers, activePaper, setActivePaper, refresh, deletePaper, retryDecode, updateTitle, startTranslation };
 }

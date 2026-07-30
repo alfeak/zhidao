@@ -39,16 +39,22 @@ class PaperService:
         paper = self.papers.get(id)
         if not paper: raise NotFoundError("Paper not found")
         return paper
+    def update_title(self, id: str, title: str):
+        paper = self.papers.get(id)
+        if not paper: raise NotFoundError("Paper not found")
+        return self.papers.update_title(id, title)
     async def import_paper(self, url, title=None, user_id: str | None = None):
         if not url or not url.strip(): raise ValidationError("Paper URL is required")
         r = await self.title_resolver.resolve(url, title)
         paper_id = self.identifier_for_url(r.url)
 
-        # 1. Check if paper already exists in DB and is decoded
         existing = self.papers.get(paper_id)
-        if existing and existing.get("isDecoded"):
-            self.reindex_paper(paper_id, user_id=user_id)
-            return existing
+        if existing:
+            if (title and title.strip()) or (r.title and not r.title.startswith("arXiv:") and existing.get("title", "").startswith("arXiv:")):
+                self.papers.update_title(paper_id, r.title)
+            if existing.get("isDecoded"):
+                self.reindex_paper(paper_id, user_id=user_id)
+                return self.papers.get(paper_id)
 
         # 2. Check if R2 storage already contains cached artifacts for this paper URL
         try:
@@ -265,7 +271,10 @@ class PaperService:
         title = paper["title"]
         documents = [{"source": "paper", "title": title, "content": f"{title}\n{paper['url']}"}]
         if paper.get("isDecoded"):
-            source_blocks = self.markdown_blocks(id, user_id=user_id)
+            try:
+                source_blocks = self.markdown_blocks(id, user_id=user_id)
+            except Exception:
+                source_blocks = []
             if not source_blocks:
                 try:
                     markdown, _ = self.markdown(id, user_id=user_id)

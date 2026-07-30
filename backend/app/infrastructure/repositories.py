@@ -64,6 +64,11 @@ class PaperRepository:
             else:
                 x.title = p["title"]; x.source_url = p["url"]; x.imported_at = p["importedAt"]
         return self.get(p["id"])
+    def update_title(self, id, title):
+        with SessionLocal.begin() as s:
+            x = s.get(DocumentRecord, id)
+            if x: x.title = title
+        return self.get(id)
     def set_status(self, id, status, error=None):
         with SessionLocal.begin() as s:
             x = s.get(DocumentRecord, id)
