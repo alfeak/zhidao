@@ -105,6 +105,25 @@ npm run dev
 
 ---
 
+## 🔌 核心 API 接口一览
+
+| 模块 | 方法 | 路径 | 说明 |
+| --- | --- | --- | --- |
+| **系统信息** | `GET` | `/api/server-info` | 获取服务器访问 URL、IP 与绑定二维码 Base64 |
+| **身份认证** | `POST` | `/api/auth/google` | Google OAuth 登录认证 |
+| **App 扫码** | `POST` | `/api/auth/temp-token` | [Web端] 申请 2分钟单次 App 授权码 TempToken |
+| **App 登录** | `POST` | `/api/auth/exchange-temp-token` | [App端] 凭 TempToken 兑换 30天正式登录 Token |
+| **论文导入** | `POST` | `/api/papers/import` | 导入 arXiv URL 或在线 PDF，自动提取元数据 |
+| **论文改名** | `PATCH` | `/api/papers/{id}/title` | 手动修改论文标题 |
+| **PDF 下载** | `GET` | `/api/papers/{id}/file` | 流式下载解析后的 PDF 原文件 |
+| **Markdown** | `GET` | `/api/papers/{id}/markdown` | 获取论文 Markdown 正文与 Block 列表 |
+| **全文翻译** | `POST` | `/api/papers/{id}/translations` | 提交全文翻译异步任务 |
+| **AI 对话** | `POST` | `/api/papers/{id}/chat/stream` | 发送 AI 对话消息 (SSE 流式打字机返回) |
+| **高亮批注** | `POST` | `/api/remarks` | 添加论文区块高亮批注 |
+
+---
+
 ## 📄 开源协议
 
 本项目基于 [Apache 2.0 License](LICENSE) 开源。
+
