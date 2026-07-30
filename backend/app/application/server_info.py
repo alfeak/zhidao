@@ -5,7 +5,10 @@ import os
 import qrcode
 
 def get_local_ip() -> str:
-    """Find local LAN IP address."""
+    """Find local LAN IP address, prioritizing environment variable overrides."""
+    env_ip = (os.getenv("SERVER_IP") or os.getenv("SERVER_HOST") or os.getenv("HOST_IP") or "").strip()
+    if env_ip:
+        return env_ip
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
@@ -16,12 +19,12 @@ def get_local_ip() -> str:
         return "127.0.0.1"
 
 def get_server_url() -> str:
-    """Get server external/internal URL."""
+    """Get server external/internal URL. Respects SERVER_URL, SERVER_IP, or PORT in env."""
     configured = os.getenv("SERVER_URL", "").strip()
     if configured:
         return configured
     ip = get_local_ip()
-    port = os.getenv("PORT", "8000")
+    port = os.getenv("SERVER_PORT") or os.getenv("PORT") or "8000"
     return f"http://{ip}:{port}"
 
 def generate_qr_data_url(data_str: str) -> str:
