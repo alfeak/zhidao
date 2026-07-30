@@ -102,3 +102,13 @@ class UserSettingsRecord(Base):
     configs_json: Mapped[str | None] = mapped_column(Text)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
     user: Mapped[UserRecord] = relationship(back_populates="settings")
+
+class TempAuthTokenRecord(Base):
+    """Temporary single-use authorization token for Web-to-Mobile App auth flow."""
+    __tablename__ = "temp_auth_tokens"
+    token: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    expires_at: Mapped[str] = mapped_column(String, nullable=False)
+    used: Mapped[bool] = mapped_column(Integer, default=0, nullable=False)
+

@@ -6,6 +6,7 @@ from .domain.errors import NotFoundError, ValidationError
 from fastapi.responses import StreamingResponse
 from .infrastructure.repositories import ConfigRepository
 from .domain.translation_languages import TRANSLATION_LANGUAGES
+from .application.server_info import generate_qr_data_url, get_server_info_dict
 
 router = APIRouter(prefix="/api")
 papers = PaperService()
@@ -60,6 +61,42 @@ def logout(request: Request, response: Response, zhidao_session: str | None = Co
         auth_service.logout_session(session_id)
     response.delete_cookie(key="zhidao_session", path="/")
     return {"success": True}
+
+@router.post("/auth/temp-token")
+def create_temp_auth_token(request: Request, zhidao_session: str | None = Cookie(None)):
+    user = get_current_user_from_req(request, zhidao_session)
+    if not user:
+        raise HTTPException(status_code=401, detail="请先在 Web 端登录账号")
+    
+    res = auth_service.create_temp_auth_token(user["id"], expires_in_seconds=120)
+    server_info = get_server_info_dict()
+    server_url = server_info["serverUrl"]
+
+    deep_link = f"zhidao://auth?token={res['tempToken']}&serverUrl={server_url}"
+    web_link = f"{server_url}/app/auth?token={res['tempToken']}&serverUrl={server_url}"
+    
+    qr_data_url = generate_qr_data_url(deep_link)
+    
+    return {
+        "success": True,
+        "tempToken": res["tempToken"],
+        "expiresIn": res["expiresIn"],
+        "expiresAt": res["expiresAt"],
+        "deepLink": deep_link,
+        "webLink": web_link,
+        "serverUrl": server_url,
+        "qrCodeDataUrl": qr_data_url
+    }
+
+@router.post("/auth/exchange-temp-token")
+def exchange_temp_token(payload: dict = Body(...)):
+    temp_token = payload.get("tempToken") or payload.get("token")
+    if not temp_token:
+        raise ValidationError("tempToken 授权码不能为空")
+    try:
+        return auth_service.exchange_temp_token(str(temp_token).strip())
+    except ValueError as e:
+        raise ValidationError(str(e))
 
 def require(value, name):
     if not value: raise ValidationError(f"{name} is required")
