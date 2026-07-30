@@ -70,6 +70,12 @@ def get_config(request: Request, zhidao_session: str | None = Cookie(None)):
     user_id = user["id"] if user else None
     return config.get_for_user(user_id, masked=True)
 
+from .application.server_info import get_server_info_dict
+
+@router.get("/server-info")
+def get_server_info():
+    return get_server_info_dict()
+
 @router.get("/translation-languages")
 def get_translation_languages(): return {"languages": TRANSLATION_LANGUAGES}
 

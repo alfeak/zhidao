@@ -12,11 +12,14 @@ from .api import router, papers
 from .domain.errors import NotFoundError, ValidationError
 from .infrastructure.database import initialize_database
 
+from .application.server_info import print_startup_qr
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     initialize_database()
     await asyncio.to_thread(papers.rebuild_search_indexes)
     await papers.recover_translation_jobs()
+    print_startup_qr()
     yield
 
 app = FastAPI(title="Zhidao API", version="1.0.0", lifespan=lifespan)
